@@ -12,7 +12,7 @@ from src.data import (
     build_preference_pairs,
     parse_metadata,
     parse_transcript,
-    split_by_row_id,
+    split_by_base_stem,
 )
 
 
@@ -163,44 +163,70 @@ def test_build_preference_pairs_is_order_independent():
     assert build_preference_pairs(rows) == build_preference_pairs(list(reversed(rows)))
 
 
-def make_pairs(n_per_language):
+def make_pairs(n_per_language, stem_prefix=None):
+    """Build throwaway pairs. By default every pair gets its own base_stem, so a test only
+    exercises cross-language sharing when it deliberately reuses a `stem_prefix`."""
     pairs = []
     for language, count in n_per_language.items():
         for i in range(count):
-            pairs.append({"row_id": f"{language}{i}", "language": language, "x": i})
+            stem = f"{stem_prefix}{i}" if stem_prefix else f"{language}{i}"
+            pairs.append(
+                {
+                    "row_id": f"{language}{i}",
+                    "base_stem": stem,
+                    "language": language,
+                    "x": i,
+                }
+            )
     return pairs
 
 
-def test_split_by_row_id_leaves_no_row_id_on_both_sides():
-    train, evaluation = split_by_row_id(make_pairs({"Swahili": 50, "Nyanja": 10}))
+def test_split_by_base_stem_leaves_no_row_id_on_both_sides():
+    train, evaluation = split_by_base_stem(make_pairs({"Swahili": 50, "Nyanja": 10}))
     assert {p["row_id"] for p in train} & {p["row_id"] for p in evaluation} == set()
 
 
 def test_split_keeps_pairs_from_one_row_id_together():
     # Two pairs sharing a row_id share an identical prompt; separating them leaks it.
     pairs = [
-        {"row_id": "R1", "language": "Swahili", "x": 0},
-        {"row_id": "R1", "language": "Swahili", "x": 1},
+        {"row_id": "R1", "base_stem": "S1", "language": "Swahili", "x": 0},
+        {"row_id": "R1", "base_stem": "S1", "language": "Swahili", "x": 1},
     ] + make_pairs({"Swahili": 20})
-    train, evaluation = split_by_row_id(pairs)
+    train, evaluation = split_by_base_stem(pairs)
     sides = [any(p["row_id"] == "R1" for p in side) for side in (train, evaluation)]
     assert sides.count(True) == 1
 
 
+def test_split_never_leaks_one_question_across_languages():
+    # The regression this whole function exists for: 265 of 566 real questions appear in
+    # more than one language, and a row_id-level split put 54% of eval questions into
+    # training under a different language. Same stems, two languages, must not straddle.
+    pairs = make_pairs({"Swahili": 40, "Hausa": 40}, stem_prefix="Q")
+    train, evaluation = split_by_base_stem(pairs)
+    assert {p["base_stem"] for p in train} & {p["base_stem"] for p in evaluation} == set()
+
+
+def test_split_still_serves_both_languages_when_every_question_is_shared():
+    # Grouping by stem must not collapse into "one language gets everything".
+    pairs = make_pairs({"Swahili": 40, "Hausa": 40}, stem_prefix="Q")
+    _, evaluation = split_by_base_stem(pairs)
+    assert {p["language"] for p in evaluation} == {"Swahili", "Hausa"}
+
+
 def test_split_gives_every_language_eval_examples():
     # A global shuffle could starve Nyanja (19 pairs against Swahili's 212) entirely.
-    _, evaluation = split_by_row_id(make_pairs({"Swahili": 212, "Nyanja": 19}))
+    _, evaluation = split_by_base_stem(make_pairs({"Swahili": 212, "Nyanja": 19}))
     assert {p["language"] for p in evaluation} == {"Swahili", "Nyanja"}
 
 
 def test_split_is_deterministic_for_a_given_seed():
     pairs = make_pairs({"Swahili": 50, "Hausa": 30})
-    assert split_by_row_id(pairs, seed=42) == split_by_row_id(pairs, seed=42)
-    assert split_by_row_id(pairs, seed=42) != split_by_row_id(pairs, seed=7)
+    assert split_by_base_stem(pairs, seed=42) == split_by_base_stem(pairs, seed=42)
+    assert split_by_base_stem(pairs, seed=42) != split_by_base_stem(pairs, seed=7)
 
 
 @pytest.mark.parametrize("fraction", [0.1, 0.2, 0.5])
 def test_split_respects_the_requested_eval_fraction(fraction):
     pairs = make_pairs({"Swahili": 100, "Hausa": 100})
-    _, evaluation = split_by_row_id(pairs, eval_fraction=fraction)
+    _, evaluation = split_by_base_stem(pairs, eval_fraction=fraction)
     assert len(evaluation) == pytest.approx(200 * fraction, abs=2)

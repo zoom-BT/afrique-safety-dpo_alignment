@@ -31,6 +31,18 @@ TURN_MARKER = re.compile(r"(?:\A|\n)[ \t]*(User|Agent):[ \t]*")
 ROLE_BY_MARKER = {"User": "user", "Agent": "assistant"}
 
 
+def base_stem(base_id: str) -> str:
+    """Strip the generator suffix from a `base_id` to get the underlying prompt's identity.
+
+    `base_id` looks like `GHA1002_llama` — a source-question id plus the model that produced
+    the dialogue. The stem `GHA1002` is what identifies the *question*, and the same stem
+    recurs across languages (265 of 566 stems appear in more than one) and across the
+    English-only file (all 566 African stems are also in it). Splitting on anything finer
+    than the stem therefore leaks a question from train into eval in a different language.
+    """
+    return base_id.rsplit("_", 1)[0]
+
+
 def parse_metadata(raw: str) -> dict:
     """Parse UbuntuGuard's `metadata` field, which is a Python dict repr, not JSON.
 
@@ -115,6 +127,7 @@ def build_pair(passing: dict, failing: dict, include_policy: bool = True) -> dic
         "chosen": [chosen_turns[divergence]],
         "rejected": [rejected_turns[divergence]],
         "row_id": passing["row_id"],
+        "base_stem": base_stem(passing["base_id"]),
         "language": passing["language"],
         "domain": passing["domain"],
         "theme": passing["theme"],
@@ -127,8 +140,8 @@ def build_preference_pairs(rows: list[dict], include_policy: bool = True) -> lis
     A `row_id` may carry more than one PASS and more than one FAIL (271 of them carry two
     of each). Those are matched up positionally so that **no response is ever reused across
     two pairs** — reusing one would inflate the apparent dataset size while feeding the same
-    text to the loss twice. This yields 1,114 pairs rather than the 501 obtained by keeping
-    only `row_id`s with exactly one PASS and one FAIL.
+    text to the loss twice. On the African test files this yields 1,089 usable pairs, against
+    the 501 obtained by keeping only `row_id`s with exactly one PASS and one FAIL.
 
     Rows are sorted by `base_id` before matching so the output is deterministic regardless
     of input order.
@@ -152,40 +165,66 @@ def build_preference_pairs(rows: list[dict], include_policy: bool = True) -> lis
     return pairs
 
 
-def split_by_row_id(
+def split_by_base_stem(
     pairs: list[dict], eval_fraction: float = 0.2, seed: int = 42
 ) -> tuple[list[dict], list[dict]]:
-    """Split pairs into train/eval, stratified by language, with no `row_id` on both sides.
+    """Split pairs into train/eval with no underlying question on both sides.
 
-    Splitting at `row_id` level (not pair level) is what prevents contamination: two pairs
-    carved from the same `row_id` share an identical prompt, so letting one land in train
-    and the other in eval would leak the training prompt straight into evaluation. This is
-    the Week 5 contract's "investigate duplication and contamination" task, enforced in code
-    rather than assumed.
+    Grouping at `base_stem` level is what prevents contamination, and it has to be that
+    coarse. Two weaker groupings both leak:
 
-    Stratifying by language keeps each language's share of the eval set proportional; the
-    corpus is heavily imbalanced (Swahili 212 pairs, Nyanja 19), so a global shuffle could
-    leave the smallest languages with no eval examples at all.
+    - Splitting per *pair* leaks verbatim: several pairs share one `row_id` and therefore
+      an identical prompt.
+    - Splitting per `row_id` leaks *across languages*: 265 of the 566 underlying questions
+      appear in more than one language, so the same question can land in train as Swahili
+      and in eval as Hausa. For a study about cross-lingual safety transfer that is fatal —
+      it would measure memorisation and report it as transfer. Measured on this corpus, a
+      `row_id`-level split put 85 of 156 eval questions (54%) into training in another
+      language.
+
+    This is the Week 5 contract's "investigate duplication and contamination" task,
+    enforced in code rather than assumed.
+
+    Languages are filled rarest-first. A stem can carry several languages, so whichever
+    language claims it first decides where it lands; going commonest-first would let
+    Swahili absorb the shared stems and leave Nyanja (19 pairs) with no eval set at all.
     """
     import random
 
-    row_ids_by_language: dict[str, list[str]] = defaultdict(list)
-    seen: set[str] = set()
+    pairs_by_stem: dict[str, list[dict]] = defaultdict(list)
     for pair in pairs:
-        if pair["row_id"] not in seen:
-            seen.add(pair["row_id"])
-            row_ids_by_language[pair["language"]].append(pair["row_id"])
+        pairs_by_stem[pair["base_stem"]].append(pair)
 
-    eval_row_ids: set[str] = set()
+    stems_by_language: dict[str, set[str]] = defaultdict(set)
+    pair_count_by_language: dict[str, int] = defaultdict(int)
+    for pair in pairs:
+        stems_by_language[pair["language"]].add(pair["base_stem"])
+        pair_count_by_language[pair["language"]] += 1
+
     rng = random.Random(seed)
-    for language in sorted(row_ids_by_language):
-        row_ids = sorted(row_ids_by_language[language])
-        rng.shuffle(row_ids)
-        n_eval = round(len(row_ids) * eval_fraction)
-        eval_row_ids.update(row_ids[:n_eval])
+    eval_stems: set[str] = set()
+    assigned: set[str] = set()
 
-    train = [p for p in pairs if p["row_id"] not in eval_row_ids]
-    evaluation = [p for p in pairs if p["row_id"] in eval_row_ids]
+    for language in sorted(pair_count_by_language, key=lambda l: (pair_count_by_language[l], l)):
+        quota = round(pair_count_by_language[language] * eval_fraction)
+        taken = sum(
+            1
+            for stem in eval_stems
+            for pair in pairs_by_stem[stem]
+            if pair["language"] == language
+        )
+        candidates = sorted(stems_by_language[language] - assigned)
+        rng.shuffle(candidates)
+        for stem in candidates:
+            if taken >= quota:
+                break
+            eval_stems.add(stem)
+            assigned.add(stem)
+            taken += sum(1 for p in pairs_by_stem[stem] if p["language"] == language)
+        assigned.update(stems_by_language[language])
+
+    train = [p for p in pairs if p["base_stem"] not in eval_stems]
+    evaluation = [p for p in pairs if p["base_stem"] in eval_stems]
     return train, evaluation
 
 
@@ -209,4 +248,4 @@ def build_ubuntuguard_dpo_datasets(
     """
     rows = load_ubuntuguard_rows(path)
     pairs = build_preference_pairs(rows, include_policy=include_policy)
-    return split_by_row_id(pairs, eval_fraction=eval_fraction, seed=seed)
+    return split_by_base_stem(pairs, eval_fraction=eval_fraction, seed=seed)
