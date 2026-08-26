@@ -19,21 +19,30 @@ training:
     r: 16
     alpha: 32
     dropout: 0.05
-  max_seq_length: 1024  # UbuntuGuard is multi-turn dialogue, longer than the single-turn Week 1-3 data
+  # Measured, not guessed: with the AfriqueQwen tokenizer the formatted pairs run to a
+  # median of 819 tokens and a maximum of 1570 (the safety policy alone is ~2,700 chars of
+  # the prompt). 1024 would silently truncate 13.8% of examples -- and truncating a DPO
+  # response destroys the very preference signal being trained on. 2048 truncates none.
+  max_seq_length: 2048
   logging_backend: tensorboard
 
 dpo:
-  # TODO (Week 5): point this at the formatted Native-DPO / Translated-DPO dataset once
-  # src/train.py's build_dpo_dataset_from_pairs() pipeline (UbuntuGuard PASS/FAIL -> ChatML,
-  # plus the NLLB-translated counterfactual) is implemented. Placeholder for now so the rest
-  # of the config has a concrete shape to test against.
+  # Built locally by src/data.py from UbuntuGuard's released test JSONL, not pulled from
+  # the Hub -- point this at the file to use. The NLLB-translated counterfactual the
+  # proposal called for is no longer on the critical path: the headline claim was recentred
+  # from H1 (native vs. translated) to H2 (does the CPT backbone retain alignment better?),
+  # which varies the backbone over a single dataset. See the vault's
+  # Week5_Deviations_From_Proposal.md, D6.
+  ubuntuguard_path: "data/Ubuntu_guard_test_crosslingual.jsonl"
   dataset_name: null
   # UbuntuGuard ships no training split (confirmed via full repo git history, not just a
-  # stale README) -- self-carved a per-language 80/20 row_id split of the released test
-  # data instead (401/100), see the vault's Week5_Dataset_Description_Sheet.md. Replaces
-  # the proposal's original train_size: 1000, which this pool can't actually reach.
-  train_size: 401
-  eval_size: 100
+  # stale README) -- self-carved a language-stratified 80/20 row_id split of the released
+  # test data instead. Pairing every PASS against every FAIL within a row_id, without ever
+  # reusing a response, yields 1,089 usable pairs -> 868 train / 221 eval. Supersedes the
+  # earlier 401/100 figure, which came from counting only row_ids holding exactly one PASS
+  # and one FAIL and so discarded roughly half the corpus.
+  train_size: 868
+  eval_size: 221
   beta: 0.1  # KL penalty strength against the frozen reference model; literature default, not yet tuned for this task
   learning_rate: 5.0e-6  # proposal section 10, E3
   warmup_ratio: 0.03

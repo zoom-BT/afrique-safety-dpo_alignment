@@ -1,9 +1,8 @@
 """DPO training entry points built on TRL and Accelerate, plus PEFT/QLoRA helpers.
 
 Meant to run on remote GPUs (Kaggle/Colab). Carried over from the internship's Week 1-3
-training pipeline (LoRA/QLoRA/DPO groundwork already tested there) and adapted for this
-topic's Native-vs-Translated DPO comparison; the dataset-loading side (formatting
-UbuntuGuard's PASS/FAIL pairs into ChatML) is Week 5 work, not yet implemented here.
+training pipeline (LoRA/QLoRA/DPO groundwork already tested there). Preference pairs come
+from `src.data`, which carves them out of UbuntuGuard's released test split.
 """
 
 import json
@@ -137,18 +136,19 @@ def compute_warmup_steps(
     return int(total_steps * warmup_ratio)
 
 
-def build_dpo_dataset_from_pairs(pairs: list[dict]):
-    """Turn a list of `{"prompt": ..., "chosen": ..., "rejected": ...}` dicts into a
-    `datasets.Dataset` in the layout `trl.DPOTrainer` expects.
+DPO_COLUMNS = ("prompt", "chosen", "rejected")
 
-    Placeholder entry point for Week 5 S1: the actual UbuntuGuard PASS/FAIL -> ChatML
-    formatting (and the NLLB-translated counterfactual for the Translated-DPO condition)
-    is not implemented yet — this just fixes the target shape so `run_dpo` below has a
-    single, stable data-loading contract regardless of where the pairs came from.
+
+def build_dpo_dataset_from_pairs(pairs: list[dict]):
+    """Turn preference-pair dicts from `src.data` into a `datasets.Dataset` for `DPOTrainer`.
+
+    Keeps only the three columns `trl` consumes, dropping the bookkeeping fields
+    (`row_id`, `language`, `domain`, `theme`) that `src.data` carries for splitting and
+    per-language reporting — `DPOTrainer` would otherwise try to tokenize them.
     """
     from datasets import Dataset
 
-    return Dataset.from_list(pairs)
+    return Dataset.from_list([{k: p[k] for k in DPO_COLUMNS} for p in pairs])
 
 
 def run_dpo(config: dict, model_path: str | None = None, max_steps: int = -1):
@@ -160,10 +160,10 @@ def run_dpo(config: dict, model_path: str | None = None, max_steps: int = -1):
     checkpoint needs to be managed.
     """
     import torch
-    from datasets import load_dataset
     from transformers import AutoModelForCausalLM, AutoTokenizer
     from trl import DPOConfig, DPOTrainer
 
+    from src.data import build_ubuntuguard_dpo_datasets
     from src.utils import get_device, set_seed
 
     training_config = config["training"]
@@ -190,10 +190,18 @@ def run_dpo(config: dict, model_path: str | None = None, max_steps: int = -1):
         )
         model = prepare_model_for_kbit_training(model)
 
-    train_dataset = load_dataset(dpo_config_values["dataset_name"], split="train")
-    train_dataset = train_dataset.select(range(dpo_config_values["train_size"]))
-    eval_dataset = load_dataset(dpo_config_values["dataset_name"], split="test")
-    eval_dataset = eval_dataset.select(range(dpo_config_values["eval_size"]))
+    train_pairs, eval_pairs = build_ubuntuguard_dpo_datasets(
+        dpo_config_values["ubuntuguard_path"], seed=training_config["seed"]
+    )
+    # train_size/eval_size cap the split rather than defining it, so the A1 ablation
+    # (100/200/868) is a config change rather than a re-split -- re-splitting would shuffle
+    # which row_ids sit in eval and make the ablation points incomparable.
+    train_dataset = build_dpo_dataset_from_pairs(
+        train_pairs[: dpo_config_values["train_size"]]
+    )
+    eval_dataset = build_dpo_dataset_from_pairs(
+        eval_pairs[: dpo_config_values["eval_size"]]
+    )
 
     warmup_steps = compute_warmup_steps(
         dataset_size=len(train_dataset),
