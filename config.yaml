@@ -23,12 +23,16 @@ training:
   logging_backend: tensorboard
 
 dpo:
-  # TODO (Week 5 S1): point this at the formatted Native-DPO / Translated-DPO dataset once
+  # TODO (Week 5): point this at the formatted Native-DPO / Translated-DPO dataset once
   # src/train.py's build_dpo_dataset_from_pairs() pipeline (UbuntuGuard PASS/FAIL -> ChatML,
   # plus the NLLB-translated counterfactual) is implemented. Placeholder for now so the rest
   # of the config has a concrete shape to test against.
   dataset_name: null
-  train_size: 1000  # matches the A1 ablation's largest condition (proposal section 11)
+  # UbuntuGuard ships no training split (confirmed via full repo git history, not just a
+  # stale README) -- self-carved a per-language 80/20 row_id split of the released test
+  # data instead (401/100), see the vault's Week5_Dataset_Description_Sheet.md. Replaces
+  # the proposal's original train_size: 1000, which this pool can't actually reach.
+  train_size: 401
   eval_size: 100
   beta: 0.1  # KL penalty strength against the frozen reference model; literature default, not yet tuned for this task
   learning_rate: 5.0e-6  # proposal section 10, E3
