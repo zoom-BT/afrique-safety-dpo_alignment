@@ -1,0 +1,44 @@
+# Global defaults for this topic's DPO training/evaluation runs.
+# See the Week 4 proposal (in the llm-alignment-internship vault) for the full
+# research design — this file only tracks the hyperparameters that come from it.
+
+paths:
+  output_dir: results/
+  cache_dir: .cache/
+
+model:
+  base_model_name: "McGill-NLP/AfriqueQwen3.5-4B-50Langs"  # M1, the target CPT backbone (B1/B2/B4)
+  # M2, the control backbone (B3): "Qwen/Qwen3.5-4B-Base" -- override base_model_name to this for that baseline
+
+training:
+  seed: 42
+  precision: bf16
+  full_finetune: false
+  load_in_4bit: true  # QLoRA: 4-bit NF4 base weights + full-precision LoRA adapters (proposal section 10, E3)
+  lora:
+    r: 16
+    alpha: 32
+    dropout: 0.05
+  max_seq_length: 1024  # UbuntuGuard is multi-turn dialogue, longer than the single-turn Week 1-3 data
+  logging_backend: tensorboard
+
+dpo:
+  # TODO (Week 5 S1): point this at the formatted Native-DPO / Translated-DPO dataset once
+  # src/train.py's build_dpo_dataset_from_pairs() pipeline (UbuntuGuard PASS/FAIL -> ChatML,
+  # plus the NLLB-translated counterfactual) is implemented. Placeholder for now so the rest
+  # of the config has a concrete shape to test against.
+  dataset_name: null
+  train_size: 1000  # matches the A1 ablation's largest condition (proposal section 11)
+  eval_size: 100
+  beta: 0.1  # KL penalty strength against the frozen reference model; literature default, not yet tuned for this task
+  learning_rate: 5.0e-6  # proposal section 10, E3
+  warmup_ratio: 0.03
+  num_epochs: 3  # proposal section 10, E3
+  eval_steps: 20
+  batch_size: 2
+  gradient_accumulation_steps: 8
+  gradient_checkpointing: true
+
+wandb:
+  project: afrique-safety-dpo
+  mode: online

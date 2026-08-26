@@ -1,0 +1,13 @@
+torch
+transformers
+datasets
+accelerate
+peft
+trl
+bitsandbytes
+wandb
+tensorboard
+matplotlib
+pyyaml
+pytest
+ruff

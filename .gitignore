@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+env/
+*.egg-info/
+
+# Secrets
+.env
+kaggle.json
+
+# Experiment tracking
+wandb/
+
+# Model artifacts (large binaries, never checked in)
+results/**/checkpoint-*
+results/**/dpo_checkpoints/
+*.safetensors
+*.bin
+*.gguf
+
+# Dataset cache (regenerable, see config.yaml paths.cache_dir)
+.cache/
+
+# Notebook noise
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
