@@ -180,3 +180,33 @@ def test_peft_config_target_modules_can_be_overridden_from_config():
         }
     )
     assert list(config.target_modules) == ["c_attn"]
+
+
+def test_resolve_precision_passes_through_what_it_cannot_improve():
+    from src.train import resolve_precision
+
+    assert resolve_precision("fp16") == "fp16"
+    assert resolve_precision("fp32") == "fp32"
+
+
+def test_resolve_precision_downgrades_bf16_when_the_gpu_lacks_it(monkeypatch):
+    # Kaggle's T4 is Turing and has no bf16; asking anyway makes accelerate upcast to fp32,
+    # which doubled activation memory and was half of the first OOM here.
+    from src import train
+
+    import torch
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: False)
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda i: "Tesla T4")
+    assert train.resolve_precision("bf16") == "fp16"
+
+
+def test_resolve_precision_keeps_bf16_where_it_is_supported(monkeypatch):
+    from src import train
+
+    import torch
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: True)
+    assert train.resolve_precision("bf16") == "bf16"

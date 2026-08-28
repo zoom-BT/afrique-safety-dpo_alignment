@@ -18,6 +18,9 @@ model:
 
 training:
   seed: 42
+  # Downgraded automatically to fp16 where the GPU lacks bf16 (Kaggle's T4 is Turing and
+  # does not have it). See src.train.resolve_precision -- asking for bf16 on a T4 does not
+  # fail, it silently upcasts activations to fp32 and doubles the memory.
   precision: bf16
   full_finetune: false
   load_in_4bit: true  # QLoRA: 4-bit NF4 base weights + full-precision LoRA adapters (proposal section 10, E3)
@@ -73,8 +76,12 @@ dpo:
   warmup_ratio: 0.03
   num_epochs: 3  # proposal section 10, E3
   eval_steps: 20
-  batch_size: 2
-  gradient_accumulation_steps: 8
+  # A 248,044-token vocabulary makes DPO logits the dominant memory cost, not the weights:
+  # seq x vocab x 4 bytes is ~2.5 GB per sequence at 2560, and DPO holds chosen *and*
+  # rejected, so ~5 GB per example. That is what OOM'd a 14.5 GB T4 at batch_size 2.
+  # Batch 1 with more accumulation keeps the effective batch at 16 either way.
+  batch_size: 1
+  gradient_accumulation_steps: 16
   gradient_checkpointing: true
 
 wandb:

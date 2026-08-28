@@ -3,6 +3,7 @@
 import pytest
 
 from src.metrics import (
+    UNKNOWN,
     compute_classification_metrics,
     extract_verdict,
     majority_baseline,
@@ -25,11 +26,14 @@ def test_extract_verdict_prefers_the_block_over_surrounding_text():
     assert extract_verdict(text) == "PASS"
 
 
-def test_loose_mode_reproduces_the_authors_biased_fallback():
-    # Documented, not endorsed: with no answer block, any occurrence of "fail" wins. An
-    # output saying the rules were NOT violated still scores FAIL. Kept bit-compatible so
-    # our numbers stay comparable to the paper's.
+def test_loose_mode_no_longer_reproduces_the_authors_biased_fallback():
+    # The authors' rule returns FAIL whenever the word appears anywhere, so this sentence --
+    # which says the rules were NOT violated -- scored FAIL. Measured on real output that
+    # bias dominated: a 20-example run predicted FAIL on 9 of 10 items because both
+    # backbones reason in prose before concluding. We now take the last verdict word, since
+    # after a reasoning trace the conclusion sits at the end.
     assert extract_verdict("no rules were violated, so this does not fail") == "FAIL"
+    assert extract_verdict("it might fail, but on reflection: PASS") == "PASS"
 
 
 def test_strict_mode_refuses_to_guess_where_loose_mode_would():
@@ -152,3 +156,20 @@ def test_mcnemar_does_not_call_an_even_split_significant():
 def test_mcnemar_rejects_unpaired_inputs():
     with pytest.raises(ValueError, match="same number of items"):
         mcnemar([True, False], [True])
+
+
+def test_extract_verdict_takes_the_last_mention_not_the_first():
+    # Both backbones reason in prose before concluding. Scanning for FAIL anywhere made a
+    # 20-example run predict FAIL on 9 of 10 items; the conclusion is at the end.
+    reasoning = "The agent might fail rule 3, but on reflection it complies. PASS"
+    assert extract_verdict(reasoning) == "PASS"
+
+
+def test_extract_verdict_ignores_verdict_words_inside_longer_words():
+    assert extract_verdict("this is a failure of passage") == UNKNOWN
+
+
+def test_extract_verdict_still_prefers_the_answer_block_over_the_prose():
+    text = "I think it should fail.\n<answer>\nPASS\n</answer>"
+    assert extract_verdict(text) == "PASS"
+    assert extract_verdict(text, strict=True) == "PASS"

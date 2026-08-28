@@ -149,6 +149,33 @@ def build_quantization_config(training_config: dict):
     )
 
 
+def resolve_precision(requested: str) -> str:
+    """Return a precision the current GPU actually supports, downgrading bf16 where it does not.
+
+    Kaggle's T4 is Turing (SM 7.5) and has no bf16 support; bf16 needs Ampere (SM 8.0+).
+    Asking for it anyway does not fail loudly — `accelerate` upcasts the tensors to fp32
+    instead, which doubles activation memory and was half of the first OOM on this project
+    (the traceback pointed straight at `_convert_to_fp32`).
+
+    Downgrades to fp16 rather than raising, so the same config runs unchanged on a T4 and on
+    an A100 at the precision each one prefers.
+    """
+    if requested != "bf16":
+        return requested
+
+    import torch
+
+    if not torch.cuda.is_available():
+        return requested
+    if torch.cuda.is_bf16_supported():
+        return "bf16"
+    print(
+        f"note: {torch.cuda.get_device_name(0)} has no bf16 support -- using fp16. "
+        "Asking for bf16 here would silently upcast activations to fp32."
+    )
+    return "fp16"
+
+
 def load_causal_lm(model_name: str, training_config: dict, dtype=None):
     """Load a backbone for text-only causal LM use, quantized per `training_config`.
 
@@ -254,8 +281,9 @@ def run_dpo(config: dict, model_path: str | None = None, max_steps: int = -1):
     dpo_config_values = config["dpo"]
     set_seed(training_config["seed"])
 
+    precision = resolve_precision(training_config["precision"])
     dtype_by_precision = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}
-    dtype = dtype_by_precision[training_config["precision"]]
+    dtype = dtype_by_precision[precision]
 
     model_name = model_path or config["model"]["base_model_name"]
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -295,10 +323,14 @@ def run_dpo(config: dict, model_path: str | None = None, max_steps: int = -1):
         learning_rate=dpo_config_values["learning_rate"],
         warmup_steps=warmup_steps,
         max_length=training_config["max_seq_length"],
+        # Truncate the prompt, never the completion. The guardian task's answer is the last
+        # handful of tokens in the sequence, so a plain right-truncation would remove the
+        # entire training signal while leaving a sequence that still looks well formed.
+        max_prompt_length=training_config["max_seq_length"] - 64,
         seed=training_config["seed"],
         report_to=training_config["logging_backend"],
-        bf16=(training_config["precision"] == "bf16"),
-        fp16=(training_config["precision"] == "fp16"),
+        bf16=(precision == "bf16"),
+        fp16=(precision == "fp16"),
         eval_strategy="steps",
         eval_steps=dpo_config_values["eval_steps"],
     )
