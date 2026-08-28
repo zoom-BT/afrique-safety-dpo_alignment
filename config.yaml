@@ -31,11 +31,14 @@ training:
     # src.train.list_lora_candidates before changing these -- names that match nothing
     # attach adapters to nothing and train silently at zero effect.
     target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
-  # Measured, not guessed: with the AfriqueQwen tokenizer the formatted pairs run to a
-  # median of 819 tokens and a maximum of 1570 (the safety policy alone is ~2,700 chars of
-  # the prompt). 1024 would silently truncate 13.8% of examples -- and truncating a DPO
-  # response destroys the very preference signal being trained on. 2048 truncates none.
-  max_seq_length: 2048
+  # Measured with the real tokenizer and the real chat template, twice, because the first
+  # measurement was of the wrong task. Generation pairs (policy + opening turn + one
+  # response) peak at 1,570 tokens. The *guardian* task embeds the whole transcript and
+  # peaks at 2,060 -- so 2048 truncates one example, and left only three tokens of margin
+  # before the template's special tokens were counted at all. Truncating here would cut the
+  # verdict off the end of the sequence, which is the entire training signal.
+  # 2560 truncates nothing on either task, with real headroom.
+  max_seq_length: 2560
   logging_backend: tensorboard
 
 dpo:
