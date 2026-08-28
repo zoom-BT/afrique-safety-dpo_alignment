@@ -70,6 +70,21 @@ def save_training_curves(log_history: list[dict], output_dir: str) -> dict:
     return {"train_points": train_points, "eval_points": eval_points}
 
 
+# Attention projections plus the MLP, the usual LoRA surface for a Qwen-family decoder.
+# PEFT ships default target modules per architecture, but has no entry for `qwen3_5` — it
+# raises "Please specify `target_modules`" rather than guessing, so they are named here.
+# Verify against a real checkpoint with `list_lora_candidates` below before changing them.
+DEFAULT_LORA_TARGET_MODULES = [
+    "q_proj",
+    "k_proj",
+    "v_proj",
+    "o_proj",
+    "gate_proj",
+    "up_proj",
+    "down_proj",
+]
+
+
 def build_peft_config(training_config: dict):
     """Return a `peft.LoraConfig` built from `training_config['lora']`, or `None` for full fine-tuning.
 
@@ -86,8 +101,30 @@ def build_peft_config(training_config: dict):
         r=lora_config["r"],
         lora_alpha=lora_config["alpha"],
         lora_dropout=lora_config["dropout"],
+        target_modules=lora_config.get("target_modules") or DEFAULT_LORA_TARGET_MODULES,
         task_type="CAUSAL_LM",
     )
+
+
+def list_lora_candidates(model) -> dict:
+    """Count the linear submodules a LoRA config could target, grouped by leaf name.
+
+    A checkpoint whose module names differ from `DEFAULT_LORA_TARGET_MODULES` would attach
+    adapters to nothing and train silently at zero effect, so this exists to check the
+    names against a real model rather than trusting the convention. Vision-tower modules
+    show up here too when a multimodal checkpoint is loaded whole — another reason to load
+    the text-only variant.
+    """
+    import collections
+
+    import torch
+
+    counts = collections.Counter(
+        name.rsplit(".", 1)[-1]
+        for name, module in model.named_modules()
+        if isinstance(module, torch.nn.Linear)
+    )
+    return dict(counts.most_common())
 
 
 def build_quantization_config(training_config: dict):

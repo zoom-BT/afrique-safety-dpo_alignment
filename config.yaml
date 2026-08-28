@@ -25,6 +25,12 @@ training:
     r: 16
     alpha: 32
     dropout: 0.05
+    # PEFT has no default target-module map for `qwen3_5` and raises rather than guessing,
+    # which is what made the first smoke-test DPO run fail. Attention projections plus the
+    # MLP, the usual LoRA surface for a Qwen decoder. Check against a real checkpoint with
+    # src.train.list_lora_candidates before changing these -- names that match nothing
+    # attach adapters to nothing and train silently at zero effect.
+    target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
   # Measured, not guessed: with the AfriqueQwen tokenizer the formatted pairs run to a
   # median of 819 tokens and a maximum of 1570 (the safety policy alone is ~2,700 chars of
   # the prompt). 1024 would silently truncate 13.8% of examples -- and truncating a DPO

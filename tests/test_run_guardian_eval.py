@@ -115,3 +115,17 @@ def test_rendered_report_states_whether_the_floor_was_cleared():
     # A model that always answers PASS scores exactly the floor, and must be flagged as such.
     flat = build_eval_records(pairs, ["<answer>\nPASS\n</answer>"] * len(pairs))
     assert "-> AT OR BELOW the floor" in render_report(build_report(flat))
+
+
+def test_render_prompt_asks_the_template_to_suppress_thinking():
+    class ThinkingTokenizer(FakeTokenizer):
+        def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=True,
+                                enable_thinking=True):
+            return f"thinking={enable_thinking}"
+
+    assert render_prompt(MESSAGES, ThinkingTokenizer("t"), thinking=False) == "thinking=False"
+
+
+def test_render_prompt_falls_back_when_the_template_rejects_enable_thinking():
+    # Templates outside the Qwen3 family reject the kwarg; a run must not abort over it.
+    assert render_prompt(MESSAGES, FakeTokenizer("t"), thinking=False).startswith("TEMPLATED:")

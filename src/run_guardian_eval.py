@@ -31,24 +31,36 @@ from src.metrics import (
     per_group_metrics,
 )
 
-# The prompt asks for "<answer>\nPASS\n</answer>", so a short budget is plenty. Left with
-# some headroom for models that reason briefly first rather than answering immediately.
-MAX_NEW_TOKENS = 64
+# Measured on Kaggle, not assumed: 64 produced a 100% unparseable rate on *both*
+# backbones, and the raw completions showed why. Neither model answers directly -- both
+# open with a reasoning trace ("Okay, let me try to figure out if the agent's...") and
+# were cut off long before reaching the answer block. A truncated-generation artefact,
+# not a failure to follow the format. 512 leaves the reasoning room to finish;
+# --no-thinking is the cheaper alternative where the chat template supports it.
+MAX_NEW_TOKENS = 512
 
 
-def render_prompt(messages: list[dict], tokenizer) -> str:
+def render_prompt(messages: list[dict], tokenizer, thinking: bool = True) -> str:
     """Turn chat messages into the string a model actually sees.
 
-    Base models frequently ship without a chat template — `Qwen3.5-4B-Base` is one of the
-    two backbones here and is not instruction-tuned — so falling back to a plain
-    `role: content` rendering keeps the same prompt usable across both backbones instead of
-    raising halfway through an evaluation run. The fallback is deliberately plain: inventing
-    special tokens the model never saw in pre-training would be worse than none.
+    Both backbones turned out to carry a ChatML template, so the fallback below is not
+    the path taken in practice. It stays because a checkpoint without one would abort a
+    run halfway. `thinking=False` asks the template to suppress the reasoning trace,
+    which is what made a 64-token budget yield nothing parseable.
+
+    The fallback is deliberately plain: inventing special tokens the model never saw in
+    pre-training would be worse than emitting none.
     """
     if getattr(tokenizer, "chat_template", None):
-        return tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
+        kwargs = {"tokenize": False, "add_generation_prompt": True}
+        if not thinking:
+            # Qwen3-family templates accept this; others reject it, so fall back rather
+            # than abort a run over it.
+            try:
+                return tokenizer.apply_chat_template(messages, enable_thinking=False, **kwargs)
+            except TypeError:
+                pass
+        return tokenizer.apply_chat_template(messages, **kwargs)
     body = "\n\n".join(f"{m['role']}: {m['content']}" for m in messages)
     return f"{body}\n\nassistant:"
 
@@ -127,7 +139,14 @@ def render_report(report: dict) -> str:
     return "\n".join(lines)
 
 
-def generate_verdicts(pairs: list[dict], model, tokenizer, batch_size: int = 8) -> list[str]:
+def generate_verdicts(
+    pairs: list[dict],
+    model,
+    tokenizer,
+    batch_size: int = 8,
+    max_new_tokens: int = MAX_NEW_TOKENS,
+    thinking: bool = True,
+) -> list[str]:
     """Generate one completion per evaluation pair. The only part that needs a GPU.
 
     Greedy decoding (`do_sample=False`): the task has one right answer and the authors'
@@ -136,7 +155,9 @@ def generate_verdicts(pairs: list[dict], model, tokenizer, batch_size: int = 8) 
     """
     from src.evaluate import generate_batch
 
-    prompts = [render_prompt(pair["prompt"], tokenizer) for pair in pairs]
+    prompts = [
+        render_prompt(pair["prompt"], tokenizer, thinking=thinking) for pair in pairs
+    ]
     completions = []
     for start in range(0, len(prompts), batch_size):
         completions.extend(
@@ -144,7 +165,7 @@ def generate_verdicts(pairs: list[dict], model, tokenizer, batch_size: int = 8) 
                 model,
                 tokenizer,
                 prompts[start : start + batch_size],
-                max_new_tokens=MAX_NEW_TOKENS,
+                max_new_tokens=max_new_tokens,
                 do_sample=False,
             )
         )
@@ -200,6 +221,14 @@ def main() -> None:
         help="score the 337 contamination-free English questions instead",
     )
     parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument(
+        "--max-new-tokens", type=int, default=MAX_NEW_TOKENS,
+        help="generation budget; too small truncates the reasoning before the verdict",
+    )
+    parser.add_argument(
+        "--no-thinking", action="store_true",
+        help="ask the chat template to suppress the reasoning trace, where supported",
+    )
     parser.add_argument("--limit", type=int, default=None, help="smoke-test on N examples")
     parser.add_argument("--output-dir", default="results/guardian")
     args = parser.parse_args()
@@ -222,7 +251,12 @@ def main() -> None:
     model = load_causal_lm(model_name, config["training"])
     model.eval()
 
-    completions = generate_verdicts(pairs, model, tokenizer, batch_size=args.batch_size)
+    completions = generate_verdicts(
+        pairs, model, tokenizer,
+        batch_size=args.batch_size,
+        max_new_tokens=args.max_new_tokens,
+        thinking=not args.no_thinking,
+    )
     records = build_eval_records(pairs, completions)
     report = build_report(
         records, label="english_control" if args.english_control else "african"
@@ -242,9 +276,11 @@ def main() -> None:
     print(f"\nwrote {output_dir}/records_{tag}.jsonl and report_{tag}.json")
     if report["loose"]["unknown_rate"] > 0.2:
         print(
-            "\nWARNING: over 20% of outputs carried no parseable verdict. On a base model "
-            "this usually means it is not following the answer format rather than failing "
-            "the task -- inspect the raw completions before reading anything into the score."
+            f"\nWARNING: over 20% of outputs carried no parseable verdict at "
+            f"--max-new-tokens {args.max_new_tokens}. Read the raw completions in the "
+            "records file before concluding anything: if they end mid-reasoning the "
+            "budget is too small rather than the model being wrong. Raise it, or pass "
+            "--no-thinking to suppress the reasoning trace."
         )
 
 

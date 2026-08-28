@@ -160,3 +160,23 @@ def test_build_dpo_dataset_from_pairs_returns_dataset_with_expected_fields():
     assert len(dataset) == 2
     assert dataset[0] == pairs[0]
     assert set(dataset.column_names) == {"prompt", "chosen", "rejected"}
+
+
+def test_peft_config_names_target_modules_since_peft_cannot_guess_for_qwen3_5():
+    # PEFT raises "Please specify `target_modules`" for this architecture rather than
+    # guessing -- this is what made the first smoke-test DPO run fail.
+    config = build_peft_config(
+        {"full_finetune": False, "lora": {"r": 8, "alpha": 16, "dropout": 0.0}}
+    )
+    assert "q_proj" in config.target_modules
+    assert "down_proj" in config.target_modules
+
+
+def test_peft_config_target_modules_can_be_overridden_from_config():
+    config = build_peft_config(
+        {
+            "full_finetune": False,
+            "lora": {"r": 8, "alpha": 16, "dropout": 0.0, "target_modules": ["c_attn"]},
+        }
+    )
+    assert list(config.target_modules) == ["c_attn"]
