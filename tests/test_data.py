@@ -8,11 +8,16 @@ Fixtures are hand-written miniatures of the real rows (same field names, same `U
 import pytest
 
 from src.data import (
+    GUARDIAN_SYSTEM_PROMPT,
+    build_guardian_pairs,
     build_pair,
     build_preference_pairs,
+    build_uhura_pairs,
+    filter_by_axis,
     parse_metadata,
     parse_transcript,
     split_by_base_stem,
+    split_three_way,
 )
 
 
@@ -230,3 +235,113 @@ def test_split_respects_the_requested_eval_fraction(fraction):
     pairs = make_pairs({"Swahili": 100, "Hausa": 100})
     _, evaluation = split_by_base_stem(pairs, eval_fraction=fraction)
     assert len(evaluation) == pytest.approx(200 * fraction, abs=2)
+
+
+# --- HHH axis stratification (D9) -------------------------------------------------------
+
+
+def themed(theme, stem):
+    return {"theme": theme, "base_stem": stem, "row_id": stem, "language": "Hausa"}
+
+
+def test_filter_by_axis_separates_honest_from_harmless():
+    pairs = [
+        themed("misinformation or disinformation", "a"),
+        themed("specialized advice", "b"),
+        themed("stereotypes", "c"),
+        themed("hate speech", "d"),
+    ]
+    assert {p["base_stem"] for p in filter_by_axis(pairs, "honest")} == {"a", "b"}
+    assert {p["base_stem"] for p in filter_by_axis(pairs, "harmless")} == {"c", "d"}
+
+
+def test_filter_by_axis_drops_public_interest_from_both():
+    # 20% of the corpus; ambiguous between the axes, so it belongs to neither group.
+    pairs = [themed("public interest", "a")]
+    assert filter_by_axis(pairs, "honest") == []
+    assert filter_by_axis(pairs, "harmless") == []
+
+
+def test_filter_by_axis_rejects_an_unknown_axis():
+    with pytest.raises(ValueError, match="unknown axis"):
+        filter_by_axis([], "helpful")
+
+
+# --- three-way split (D8) ---------------------------------------------------------------
+
+
+def test_split_three_way_shares_no_stem_between_any_two_slices():
+    judge, agent, evaluation = split_three_way(make_pairs({"Hausa": 60, "Zulu": 40}))
+    stems = [{p["base_stem"] for p in slice_} for slice_ in (judge, agent, evaluation)]
+    assert stems[0] & stems[1] == set()
+    assert stems[0] & stems[2] == set()
+    assert stems[1] & stems[2] == set()
+
+
+def test_split_three_way_keeps_every_pair():
+    pairs = make_pairs({"Hausa": 60, "Zulu": 40})
+    judge, agent, evaluation = split_three_way(pairs)
+    assert len(judge) + len(agent) + len(evaluation) == len(pairs)
+
+
+def test_split_three_way_gives_the_agent_the_largest_slice():
+    judge, agent, evaluation = split_three_way(make_pairs({"Hausa": 100}))
+    assert len(agent) > len(judge) and len(agent) > len(evaluation)
+
+
+# --- guardian task (D8) -----------------------------------------------------------------
+
+
+def test_build_guardian_pairs_contrasts_the_true_verdict_against_its_opposite():
+    rows = [make_row("R1", "R1_llama", "FAIL", TWO_TURN_FAIL)]
+    pair = build_guardian_pairs(rows)[0]
+    assert pair["chosen"][0]["content"] == "<answer>\nFAIL\n</answer>"
+    assert pair["rejected"][0]["content"] == "<answer>\nPASS\n</answer>"
+
+
+def test_build_guardian_prompt_carries_the_authors_system_prompt_and_tags():
+    pair = build_guardian_pairs([make_row("R1", "R1_a", "PASS", TWO_TURN_PASS)])[0]
+    assert pair["prompt"][0]["content"] == GUARDIAN_SYSTEM_PROMPT
+    user = pair["prompt"][1]["content"]
+    assert "<rules>" in user and "</rules>" in user
+    assert "<transcript>" in user and "</transcript>" in user
+
+
+def test_build_guardian_pairs_uses_every_labelled_row_not_just_pairable_ones():
+    # The generation framing needs a PASS and a FAIL sharing a row_id; the guardian task
+    # needs neither, so an unpaired row still yields a usable training example.
+    rows = [make_row("R1", "R1_a", "PASS", TWO_TURN_PASS)]
+    assert len(build_guardian_pairs(rows)) == 1
+
+
+# --- Uhura-TruthfulQA (D9) --------------------------------------------------------------
+
+
+UHURA_ROW = {
+    "question": "Me ya faruwa da sauqin abinci?",
+    "best_answer": "Abinci ya yi sauqi sosai",
+    "correct_answers": ["Abinci ya yi sauqi sosai"],
+    "incorrect_answers": ["Abinci ya yi tsada", "Ba a san ba"],
+    "category": "Economics",
+}
+
+
+def test_build_uhura_pairs_reads_best_and_incorrect_answers():
+    pair = build_uhura_pairs([UHURA_ROW], "Hausa")[0]
+    assert pair["chosen"][0]["content"] == "Abinci ya yi sauqi sosai"
+    assert pair["rejected"][0]["content"] == "Abinci ya yi tsada"
+    assert pair["theme"] in ("misinformation or disinformation",)
+
+
+def test_build_uhura_pairs_keys_the_stem_on_the_question_not_the_language():
+    # The same question exists in every language config; keying on language would let the
+    # Hausa and Swahili renderings of one question straddle a split.
+    ha = build_uhura_pairs([UHURA_ROW], "Hausa")[0]
+    sw = build_uhura_pairs([UHURA_ROW], "Swahili")[0]
+    assert ha["base_stem"] == sw["base_stem"]
+    assert ha["row_id"] != sw["row_id"]
+
+
+def test_build_uhura_pairs_skips_rows_with_nothing_to_contrast():
+    assert build_uhura_pairs([{**UHURA_ROW, "incorrect_answers": []}], "Hausa") == []
+    assert build_uhura_pairs([{**UHURA_ROW, "best_answer": "  "}], "Hausa") == []

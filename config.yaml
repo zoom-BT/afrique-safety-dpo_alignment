@@ -9,6 +9,12 @@ paths:
 model:
   base_model_name: "McGill-NLP/AfriqueQwen3.5-4B-50Langs"  # M1, the target CPT backbone (B1/B2/B4)
   # M2, the control backbone (B3): "Qwen/Qwen3.5-4B-Base" -- override base_model_name to this for that baseline
+  # The compliance judge deliberately runs on the CONTROL backbone, not the target one.
+  # A judge sharing a backbone with the agent it scores would favour that agent, and H2
+  # compares a Qwen-Base agent against an AfriqueQwen agent -- so an AfriqueQwen judge would
+  # inflate exactly the effect being claimed. Building it on Qwen-Base makes any
+  # backbone-affinity bias work against the hypothesis. See D8.
+  judge_model_name: "Qwen/Qwen3.5-4B-Base"
 
 training:
   seed: 42
@@ -35,6 +41,16 @@ dpo:
   # Week5_Deviations_From_Proposal.md, D6.
   ubuntuguard_path: "data/Ubuntu_guard_test_crosslingual.jsonl"
   dataset_name: null
+  # Which HHH axis to train on: "honest", "harmless", or null for all themes.
+  # The study trains on honest and evaluates on both -- harmless-only leaves 216 training
+  # pairs across ten languages, which is not a study. See the vault's
+  # Week5_Deviations_From_Proposal.md, D9.
+  axis: honest
+  # Three disjoint base_stem slices: the compliance judge and the aligned agent are trained
+  # on the same corpus, so they must not share questions, and neither may have seen the
+  # evaluation set. On the guardian task this gives 461 / 1373 / 473. See D8.
+  eval_fraction: 0.2
+  judge_fraction: 0.25
   # UbuntuGuard ships no training split (confirmed via full repo git history, not just a
   # stale README) -- self-carved a language-stratified 80/20 row_id split of the released
   # test data instead. Pairing every PASS against every FAIL within a row_id, without ever
