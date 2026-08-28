@@ -112,6 +112,53 @@ def build_quantization_config(training_config: dict):
     )
 
 
+def load_causal_lm(model_name: str, training_config: dict, dtype=None):
+    """Load a backbone for text-only causal LM use, quantized per `training_config`.
+
+    Both backbones here are `model_type: qwen3_5`, whose checkpoints declare
+    `Qwen3_5ForConditionalGeneration` and carry a `vision_config` alongside their
+    `text_config` — they are multimodal. `AutoModelForCausalLM` resolves that model type to
+    `Qwen3_5ForCausalLM`, the text-only variant, which is what we want: the vision tower is
+    never used here and leaving it out saves the memory it would occupy.
+
+    That mapping only exists in transformers >= 5.12; older releases do not know `qwen3_5`
+    at all and fail outright, hence the pin in requirements.txt. The error message below
+    exists because the default failure is an opaque one about an unrecognised
+    configuration, which is a bad thing to hit for the first time inside a GPU session.
+    """
+    import torch
+    from transformers import AutoModelForCausalLM
+
+    from src.utils import get_device
+
+    dtype = dtype or torch.bfloat16
+    quantization_config = build_quantization_config(training_config)
+    kwargs = {"dtype": dtype}
+    if quantization_config is not None:
+        # 4-bit layers place themselves via bitsandbytes; device_map replaces model.to().
+        kwargs |= {"quantization_config": quantization_config, "device_map": {"": 0}}
+
+    try:
+        model = AutoModelForCausalLM.from_pretrained(model_name, **kwargs)
+    except (KeyError, ValueError) as error:
+        import transformers
+
+        raise RuntimeError(
+            f"could not load {model_name} as a causal LM with transformers "
+            f"{transformers.__version__}. Both backbones are model_type 'qwen3_5', which "
+            "needs transformers >= 5.12.1 — on Kaggle, run `pip install -U transformers` "
+            "before importing anything from this package."
+        ) from error
+
+    if quantization_config is None:
+        model.to(get_device())
+    else:
+        from peft import prepare_model_for_kbit_training
+
+        model = prepare_model_for_kbit_training(model)
+    return model
+
+
 def compute_warmup_steps(
     dataset_size: int,
     batch_size: int,
@@ -160,11 +207,11 @@ def run_dpo(config: dict, model_path: str | None = None, max_steps: int = -1):
     checkpoint needs to be managed.
     """
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoTokenizer
     from trl import DPOConfig, DPOTrainer
 
     from src.data import build_ubuntuguard_dpo_datasets
-    from src.utils import get_device, set_seed
+    from src.utils import set_seed
 
     training_config = config["training"]
     dpo_config_values = config["dpo"]
@@ -175,20 +222,7 @@ def run_dpo(config: dict, model_path: str | None = None, max_steps: int = -1):
 
     model_name = model_path or config["model"]["base_model_name"]
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-
-    quantization_config = build_quantization_config(training_config)
-    if quantization_config is None:
-        model = AutoModelForCausalLM.from_pretrained(model_name, dtype=dtype)
-        model.to(get_device())
-    else:
-        # 4-bit (QLoRA) layers manage their own device placement via bitsandbytes;
-        # device_map replaces the usual model.to(device) call for this path.
-        from peft import prepare_model_for_kbit_training
-
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name, dtype=dtype, quantization_config=quantization_config, device_map={"": 0}
-        )
-        model = prepare_model_for_kbit_training(model)
+    model = load_causal_lm(model_name, training_config, dtype=dtype)
 
     train_pairs, eval_pairs = build_ubuntuguard_dpo_datasets(
         dpo_config_values["ubuntuguard_path"], seed=training_config["seed"]

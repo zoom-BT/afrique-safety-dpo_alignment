@@ -211,27 +211,15 @@ def main() -> None:
     if args.limit:
         pairs = pairs[: args.limit]
 
-    import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoTokenizer
 
-    from src.train import build_quantization_config
-    from src.utils import get_device, set_seed
+    from src.train import load_causal_lm
+    from src.utils import set_seed
 
     set_seed(config["training"]["seed"])
     model_name = args.model or config["model"]["base_model_name"]
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-
-    quantization_config = build_quantization_config(config["training"])
-    if quantization_config is None:
-        model = AutoModelForCausalLM.from_pretrained(model_name, dtype=torch.bfloat16)
-        model.to(get_device())
-    else:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            dtype=torch.bfloat16,
-            quantization_config=quantization_config,
-            device_map={"": 0},
-        )
+    model = load_causal_lm(model_name, config["training"])
     model.eval()
 
     completions = generate_verdicts(pairs, model, tokenizer, batch_size=args.batch_size)

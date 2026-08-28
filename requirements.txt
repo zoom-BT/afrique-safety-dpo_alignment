@@ -1,10 +1,17 @@
-torch
-transformers
-datasets
-accelerate
-peft
-trl
-bitsandbytes
+# Lower bounds, not exact pins: Kaggle images ship their own CUDA-matched torch, and
+# pinning it exactly forces a multi-GB reinstall at the start of every session.
+#
+# transformers is the one that genuinely matters. Both backbones are `model_type:
+# qwen3_5`, which older releases do not know at all -- on an image that ships
+# transformers 4.x the model does not load, it errors out. Kaggle's own generated snippet
+# opens with `pip install -U transformers` for exactly this reason.
+torch>=2.6
+transformers>=5.12.1
+datasets>=4.0
+accelerate>=1.0
+peft>=0.15
+trl>=1.0
+bitsandbytes>=0.45
 wandb
 tensorboard
 matplotlib
