@@ -12,6 +12,11 @@ kaggle.json
 # Experiment tracking
 wandb/
 
+# Sorties recuperees depuis Kaggle: regenerables par `kaggle_run.py fetch`, et lourdes.
+# Le motif results/**/checkpoint-* ne suffisait pas -- TRL ecrit aussi un dossier "final",
+# et 41 Mo d'adaptateurs et d'optimiseur sont passes dans un commit avant qu'on le voie.
+results/kaggle/
+
 # Model artifacts (large binaries, never checked in)
 results/**/checkpoint-*
 results/**/dpo_checkpoints/
