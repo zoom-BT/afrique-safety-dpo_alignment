@@ -36,9 +36,17 @@ def test_metadata_defaults_to_internet_on():
     assert build_metadata("n/x_notebook.ipynb", "balbinotchoutzine")["enable_internet"] is True
 
 
+def test_metadata_asks_for_t4_by_name_not_the_deprecated_enable_gpu():
+    # The SDK marks enable_gpu deprecated in favour of machine_shape, and only the latter
+    # lets us name T4 instead of accepting whichever GPU Kaggle assigns.
+    meta = build_metadata("n/x_notebook.ipynb", "balbinotchoutzine", accelerator="t4")
+    assert meta["machine_shape"] == "NvidiaTeslaT4"
+    assert "enable_gpu" not in meta
+
+
 def test_metadata_gpu_is_off_unless_asked():
-    assert build_metadata("n/x_notebook.ipynb", "balbinotchoutzine")["enable_gpu"] is False
-    assert build_metadata("n/x_notebook.ipynb", "balbinotchoutzine", gpu=True)["enable_gpu"] is True
+    assert "machine_shape" not in build_metadata("n/x_notebook.ipynb", "balbinotchoutzine")
+    assert build_metadata("n/x_notebook.ipynb", "balbinotchoutzine", accelerator="t4")["machine_shape"] == "NvidiaTeslaT4"
 
 
 def test_metadata_id_combines_username_and_slug():

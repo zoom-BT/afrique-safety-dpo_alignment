@@ -25,11 +25,19 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Turing (T4) over Pascal (P100): T4 has usable fp16 tensor cores and works properly with
-# bitsandbytes 4-bit, which is what this project's QLoRA path needs. Neither supports bf16,
-# so src.train.resolve_precision downgrades to fp16 on both -- but the P100 executes it far
-# more slowly. Kaggle exposes the choice in the notebook's accelerator setting, not here.
-PREFERRED_ACCELERATOR = "T4 x2"
+# Values the API accepts for `machine_shape`, read out of the installed kagglesdk rather
+# than guessed: NvidiaTeslaT4, NvidiaTeslaP100, Tpu1VmV38.
+#
+# T4 over P100: Turing has usable fp16 tensor cores and works properly with bitsandbytes
+# 4-bit, which is what this project's QLoRA path needs. Neither supports bf16, so
+# src.train.resolve_precision downgrades to fp16 on both -- but Pascal executes it far more
+# slowly.
+ACCELERATORS = {
+    "t4": "NvidiaTeslaT4",
+    "p100": "NvidiaTeslaP100",
+    "tpu": "Tpu1VmV38",
+}
+DEFAULT_ACCELERATOR = "t4"
 
 
 def slugify(name: str) -> str:
@@ -50,7 +58,7 @@ def build_metadata(
     username: str,
     *,
     title: str | None = None,
-    gpu: bool = False,
+    accelerator: str | None = None,
     internet: bool = True,
     private: bool = True,
     dataset_sources: list[str] | None = None,
@@ -64,6 +72,10 @@ def build_metadata(
 
     `private` defaults to True: the vault and this repository are private, and a Kaggle
     kernel is public by default.
+
+    `accelerator` is written as `machine_shape`, not as `enable_gpu`. The SDK marks
+    `enable_gpu` deprecated in favour of `machine_shape`, and only the latter lets us name
+    T4 rather than accepting whichever GPU Kaggle assigns.
     """
     slug = slugify(notebook)
     return {
@@ -73,12 +85,12 @@ def build_metadata(
         "language": "python",
         "kernel_type": "notebook",
         "is_private": private,
-        "enable_gpu": gpu,
         "enable_internet": internet,
         "dataset_sources": dataset_sources or [],
         "competition_sources": [],
         "kernel_sources": [],
         "model_sources": model_sources or [],
+        **({"machine_shape": ACCELERATORS[accelerator]} if accelerator else {}),
     }
 
 
@@ -105,7 +117,7 @@ def push(args) -> int:
         str(notebook),
         args.username,
         title=args.title,
-        gpu=args.gpu,
+        accelerator=args.accelerator,
         internet=not args.no_internet,
         private=not args.public,
         model_sources=args.model or [],
@@ -155,7 +167,17 @@ def main() -> int:
     p = sub.add_parser("push", help="write metadata and submit the notebook")
     p.add_argument("notebook")
     p.add_argument("--title")
-    p.add_argument("--gpu", action="store_true")
+    p.add_argument(
+        "--accelerator",
+        nargs="?",
+        const=DEFAULT_ACCELERATOR,
+        choices=sorted(ACCELERATORS),
+        help="request a GPU; bare --accelerator means t4, the right choice here",
+    )
+    p.add_argument(
+        "--timeout", type=int,
+        help="cap the run in seconds; a hung job otherwise eats the weekly quota",
+    )
     p.add_argument("--no-internet", action="store_true")
     p.add_argument("--public", action="store_true", help="override the private default")
     p.add_argument("--model", action="append", help="Kaggle model source, repeatable")
