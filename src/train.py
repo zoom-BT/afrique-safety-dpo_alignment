@@ -176,6 +176,27 @@ def resolve_precision(requested: str) -> str:
     return "fp16"
 
 
+def resolve_device_map(training_config: dict):
+    """Return the `device_map` to load with, spreading across GPUs when there is more than one.
+
+    Kaggle's "T4 x2" accelerator really is two devices. Pinning to `{"": 0}` leaves the
+    second one idle and makes the first OOM sooner than it needs to.
+
+    Overridable through `training.device_map` for the cases where the automatic placement
+    is wrong -- a single-GPU box, or a run that must stay on one device to keep a
+    measurement comparable.
+    """
+    override = training_config.get("device_map")
+    if override is not None:
+        return override
+
+    import torch
+
+    if torch.cuda.is_available() and torch.cuda.device_count() > 1:
+        return "auto"
+    return {"": 0}
+
+
 def load_causal_lm(model_name: str, training_config: dict, dtype=None):
     """Load a backbone for text-only causal LM use, quantized per `training_config`.
 
@@ -200,7 +221,17 @@ def load_causal_lm(model_name: str, training_config: dict, dtype=None):
     kwargs = {"dtype": dtype}
     if quantization_config is not None:
         # 4-bit layers place themselves via bitsandbytes; device_map replaces model.to().
-        kwargs |= {"quantization_config": quantization_config, "device_map": {"": 0}}
+        #
+        # "auto" rather than pinning everything to device 0: Kaggle's T4 accelerator is
+        # **two** T4s, and the first real run OOM'd on GPU 0 while the second sat entirely
+        # idle. `device_map={"": 0}` was carried over from a single-GPU assumption that was
+        # never checked. With "auto", accelerate spreads the layers and the later ones --
+        # including the head that materialises 248,044 logits per position -- land on the
+        # device with room left.
+        kwargs |= {
+            "quantization_config": quantization_config,
+            "device_map": resolve_device_map(training_config),
+        }
 
     try:
         model = AutoModelForCausalLM.from_pretrained(model_name, **kwargs)

@@ -259,3 +259,31 @@ def test_sft_batch_is_one_because_the_vocabulary_dominates_memory():
     assert config["sft"]["batch_size"] == 1
     effective = config["sft"]["batch_size"] * config["sft"]["gradient_accumulation_steps"]
     assert effective == 16, "le lot effectif doit rester a 16"
+
+
+def test_device_map_spreads_across_gpus_when_there_are_several(monkeypatch):
+    # Kaggle's "T4 x2" really is two devices. The first real run OOM'd on GPU 0 while the
+    # second sat idle, because the map was pinned to {"": 0} from a single-GPU assumption.
+    import torch
+
+    from src.train import resolve_device_map
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+    assert resolve_device_map({}) == "auto"
+
+
+def test_device_map_pins_to_one_device_when_there_is_only_one(monkeypatch):
+    import torch
+
+    from src.train import resolve_device_map
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
+    assert resolve_device_map({}) == {"": 0}
+
+
+def test_device_map_can_be_overridden_to_keep_a_measurement_comparable():
+    from src.train import resolve_device_map
+
+    assert resolve_device_map({"device_map": {"": 0}}) == {"": 0}
