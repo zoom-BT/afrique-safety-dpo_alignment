@@ -141,6 +141,7 @@ def push(args) -> int:
         internet=not args.no_internet,
         private=not args.public,
         model_sources=args.model or [],
+        dataset_sources=args.dataset or [],
     )
     # Stage into a directory holding only this notebook. `kaggle kernels push -p DIR`
     # uploads everything in DIR, so pushing notebooks/ directly would ship every other
@@ -167,6 +168,67 @@ def push(args) -> int:
         # cost what the command costs.
         print(f"\n[dry-run] rien n'a ete envoye. Retirer --dry-run pour publier.")
         return 0
+    return _run(command)
+
+
+# Files the notebooks actually import or read. Deliberately not the whole repository:
+# notebooks/ holds a 3.4 MB PDF and .git is irrelevant on the Kaggle side.
+DATASET_CONTENT = ["src", "data", "config.yaml", "requirements.txt"]
+
+
+def dataset(args) -> int:
+    """Package the code as a private Kaggle Dataset, replacing the git clone entirely.
+
+    Why this exists rather than cloning: a Kaggle secret cannot be attached through the
+    API, and -- measured on two real runs -- an API push appears to *clear* attachments
+    made in the editor, since `kernel-metadata.json` carries no secrets field and replaces
+    the kernel's settings wholesale. A notebook depending on a secret is therefore not
+    submittable fire-and-forget at all.
+
+    A dataset has none of that problem: `dataset_sources` is a real metadata field the API
+    honours, and the content lands read-only under /kaggle/input. No token, no manual step.
+    """
+    staging = Path(args.staging) / "dataset"
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True)
+
+    for name in DATASET_CONTENT:
+        source = Path(name)
+        if not source.exists():
+            print(f"skipping {name}: not present", file=sys.stderr)
+            continue
+        if source.is_dir():
+            shutil.copytree(
+                source,
+                staging / name,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+            )
+        else:
+            shutil.copy2(source, staging / name)
+
+    slug = args.slug or "afrique-safety-dpo-code"
+    metadata = {
+        "title": args.title or slug,
+        "id": f"{args.username}/{slug}",
+        "licenses": [{"name": "unknown"}],
+    }
+    (staging / "dataset-metadata.json").write_text(
+        json.dumps(metadata, indent=2) + "\n", encoding="utf-8"
+    )
+    total = sum(f.stat().st_size for f in staging.rglob("*") if f.is_file())
+    print(f"staged {total / 1e6:.1f} MB in {staging} as {args.username}/{slug}")
+
+    if args.dry_run:
+        print("\n[dry-run] rien n'a ete envoye.")
+        return 0
+
+    # `create` the first time, `version` afterwards -- the API has no upsert.
+    if args.create:
+        command = ["kaggle", "datasets", "create", "-p", str(staging), "-r", "zip"]
+    else:
+        command = ["kaggle", "datasets", "version", "-p", str(staging),
+                   "-r", "zip", "-m", args.message]
     return _run(command)
 
 
@@ -213,10 +275,24 @@ def main() -> int:
     p.add_argument("--public", action="store_true", help="override the private default")
     p.add_argument("--model", action="append", help="Kaggle model source, repeatable")
     p.add_argument(
+        "--dataset", action="append",
+        help="Kaggle dataset source, repeatable. Use this instead of cloning: it needs no "
+             "secret, which the API cannot attach anyway",
+    )
+    p.add_argument(
         "--staging", default=".kaggle_staging",
         help="directory to stage the upload in; only its contents are uploaded",
     )
     p.set_defaults(func=push)
+
+    d = sub.add_parser("dataset", help="package the code as a private Kaggle Dataset")
+    d.add_argument("--slug", help="dataset slug (default afrique-safety-dpo-code)")
+    d.add_argument("--title")
+    d.add_argument("--create", action="store_true", help="first upload; omit to add a version")
+    d.add_argument("--message", default="update", help="version message")
+    d.add_argument("--staging", default=".kaggle_staging")
+    d.add_argument("--dry-run", action="store_true")
+    d.set_defaults(func=dataset)
 
     s = sub.add_parser("status", help="check a submitted run")
     s.add_argument("slug")
