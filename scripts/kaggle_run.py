@@ -15,6 +15,20 @@ Prerequisites, both on the operator's machine and never committed:
      placed at ~/.kaggle/kaggle.json (chmod 600 on POSIX)
 
 `kaggle.json` is already in .gitignore.
+
+Two things the API cannot do, both discovered the expensive way:
+
+1. **Attaching secrets.** No field in the SDK, no CLI flag. They are ticked once per
+   notebook in the editor (Add-ons > Secrets); the attachment then persists across every
+   version pushed by the API. A notebook reading a secret that is not attached starts,
+   reserves the GPU, and only then fails.
+
+2. **Pushing while the editor holds a draft.** Opening the notebook in the browser — which
+   attaching secrets requires — creates a draft with its own sequence number. A push then
+   fails with `ConcurrencyViolation: ExpectedSequence=N, ActualSequence=N-1`. Nothing runs
+   and no quota is spent, but the push is refused. Resolve it with File > Quick Save in
+   the editor (which saves without re-running, so no GPU), then close the tab and push
+   again.
 """
 
 import argparse
