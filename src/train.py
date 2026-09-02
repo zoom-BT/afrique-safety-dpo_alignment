@@ -85,6 +85,46 @@ DEFAULT_LORA_TARGET_MODULES = [
 ]
 
 
+class IncrementalMetrics:
+    """Ecrit l'historique d'entrainement sur disque a chaque log, pas seulement a la fin.
+
+    `save_training_curves` ne s'execute qu'apres `trainer.train()`. Une session Kaggle
+    coupee -- plafond de 9 h, annulation, panne -- perdait donc l'integralite des mesures
+    d'un run de 5 h. Ce callback rend chaque log durable des qu'il est produit.
+
+    Volontairement sans dependance a TRL: `TrainerCallback` est importe a l'appel pour que
+    le module reste testable sans transformers charge.
+    """
+
+    def __init__(self, path):
+        from pathlib import Path
+
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.history = []
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        import json
+
+        if logs:
+            self.history.append({**logs, "step": state.global_step})
+            self.path.write_text(json.dumps(self.history, indent=2), encoding="utf-8")
+        return control
+
+
+def make_metrics_callback(path):
+    """Enveloppe `IncrementalMetrics` dans un vrai `TrainerCallback`."""
+    from transformers import TrainerCallback
+
+    writer = IncrementalMetrics(path)
+
+    class Callback(TrainerCallback):
+        def on_log(self, args, state, control, logs=None, **kwargs):
+            return writer.on_log(args, state, control, logs=logs, **kwargs)
+
+    return Callback()
+
+
 def build_peft_config(training_config: dict):
     """Return a `peft.LoraConfig` built from `training_config['lora']`, or `None` for full fine-tuning.
 
@@ -323,7 +363,7 @@ def build_sft_dataset_from_examples(examples: list[dict]):
 
 
 def run_sft(config: dict, examples: list[dict], model_path: str | None = None,
-            max_steps: int = -1):
+            max_steps: int = -1, resume: bool = True):
     """Supervised fine-tuning — the first of the two InstructGPT-style stages.
 
     Not optional here, and not a formality. Both backbones are *base* checkpoints: the
@@ -388,6 +428,12 @@ def run_sft(config: dict, examples: list[dict], model_path: str | None = None,
         bf16=(precision == "bf16"),
         fp16=(precision == "fp16"),
         logging_steps=sft_config.get("logging_steps", 10),
+        # Sauvegarde periodique: un SFT complet dure 5,55 h contre un plafond de session
+        # de 9 h, et une coupure sans checkpoint intermediaire perdrait tout. Les
+        # adaptateurs LoRA pesent quelques dizaines de Mo, le cout disque est negligeable.
+        save_strategy="steps",
+        save_steps=sft_config.get("save_steps", 20),
+        save_total_limit=sft_config.get("save_total_limit", 2),
         # "nll" plutot que le "chunked_nll" par defaut de TRL. Le chunking existe pour
         # economiser la memoire sur les gros vocabulaires -- le notre en compte 248 044 --
         # mais il patche model.forward en supposant une methode liee, or device_map="auto"
@@ -407,10 +453,26 @@ def run_sft(config: dict, examples: list[dict], model_path: str | None = None,
         peft_config=build_peft_config(training_config),
         processing_class=tokenizer,
     )
-    trainer.train()
+    trainer.add_callback(
+        make_metrics_callback(config["paths"]["output_dir"] + "sft/metrics_live.json")
+    )
+    trainer.train(resume_from_checkpoint=_latest_checkpoint(output_dir) if resume else None)
     trainer.save_model(output_dir + "/final")
     save_training_curves(trainer.state.log_history, config["paths"]["output_dir"] + "sft")
     return trainer
+
+
+def _latest_checkpoint(directory: str):
+    """Dernier `checkpoint-N` d'un dossier, ou None -- pour reprendre apres une coupure."""
+    from pathlib import Path
+
+    path = Path(directory)
+    if not path.exists():
+        return None
+    points = [d for d in path.glob("checkpoint-*") if d.is_dir()]
+    if not points:
+        return None
+    return str(max(points, key=lambda d: int(d.name.split("-")[-1])))
 
 
 def run_dpo(config: dict, pairs: list[dict] | None = None,
@@ -499,6 +561,9 @@ def run_dpo(config: dict, pairs: list[dict] | None = None,
         fp16=(precision == "fp16"),
         eval_strategy="steps" if eval_pairs else "no",
         eval_steps=dpo_config_values["eval_steps"],
+        save_strategy="steps",
+        save_steps=dpo_config_values.get("save_steps", 10),
+        save_total_limit=dpo_config_values.get("save_total_limit", 2),
     )
 
     trainer = DPOTrainer(
@@ -513,7 +578,11 @@ def run_dpo(config: dict, pairs: list[dict] | None = None,
         peft_config=None if adapter_path else build_peft_config(training_config),
         processing_class=tokenizer,
     )
-    trainer.train()
-    trainer.save_model(config["paths"]["output_dir"] + "dpo_checkpoints/final")
+    trainer.add_callback(
+        make_metrics_callback(config["paths"]["output_dir"] + "dpo/metrics_live.json")
+    )
+    dpo_out = config["paths"]["output_dir"] + "dpo_checkpoints"
+    trainer.train(resume_from_checkpoint=_latest_checkpoint(dpo_out))
+    trainer.save_model(dpo_out + "/final")
     save_training_curves(trainer.state.log_history, config["paths"]["output_dir"] + "dpo")
     return trainer
