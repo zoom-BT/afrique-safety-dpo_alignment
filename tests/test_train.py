@@ -237,3 +237,25 @@ def test_sft_and_dpo_use_different_learning_rates_by_design():
 
     config = yaml.safe_load(open("config.yaml"))
     assert config["sft"]["learning_rate"] > config["dpo"]["learning_rate"]
+
+
+def test_each_task_has_its_own_measured_sequence_length():
+    # The 2560 in training.max_seq_length was measured on the v1 guardian task, which
+    # embedded whole transcripts. Aya demonstrations run to a median of 46 tokens and the
+    # Hausa DPO pairs peak at 974 -- carrying 2560 into both wasted 2.5x the memory and
+    # OOM'd the first real T4 run.
+    import yaml
+
+    config = yaml.safe_load(open("config.yaml"))
+    assert config["sft"]["max_length"] < config["training"]["max_seq_length"]
+    assert config["dpo"]["max_length"] < config["training"]["max_seq_length"]
+
+
+def test_sft_batch_is_one_because_the_vocabulary_dominates_memory():
+    # 248,044 logits per position: at batch 2 and seq 2560 that is 2.5 GB before gradients.
+    import yaml
+
+    config = yaml.safe_load(open("config.yaml"))
+    assert config["sft"]["batch_size"] == 1
+    effective = config["sft"]["batch_size"] * config["sft"]["gradient_accumulation_steps"]
+    assert effective == 16, "le lot effectif doit rester a 16"

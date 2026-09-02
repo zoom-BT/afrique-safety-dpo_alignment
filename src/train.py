@@ -331,7 +331,11 @@ def run_sft(config: dict, examples: list[dict], model_path: str | None = None,
         max_steps=max_steps,
         learning_rate=sft_config["learning_rate"],
         warmup_steps=warmup_steps,
-        max_length=training_config["max_seq_length"],
+        # Longueur propre au SFT: les demonstrations Aya sont des instructions courtes
+        # (mediane 46 tokens), pas les transcripts entiers pour lesquels 2560 avait ete
+        # mesure. Avec un vocabulaire de 248 044, les logits dominent la memoire et leur
+        # taille est lineaire en longueur de sequence.
+        max_length=sft_config.get("max_length", training_config["max_seq_length"]),
         seed=training_config["seed"],
         report_to=training_config["logging_backend"],
         bf16=(precision == "bf16"),
@@ -412,11 +416,11 @@ def run_dpo(config: dict, model_path: str | None = None, max_steps: int = -1):
         max_steps=max_steps,
         learning_rate=dpo_config_values["learning_rate"],
         warmup_steps=warmup_steps,
-        max_length=training_config["max_seq_length"],
+        max_length=dpo_config_values.get("max_length", training_config["max_seq_length"]),
         # Truncate the prompt, never the completion. The guardian task's answer is the last
         # handful of tokens in the sequence, so a plain right-truncation would remove the
         # entire training signal while leaving a sequence that still looks well formed.
-        max_prompt_length=training_config["max_seq_length"] - 64,
+        max_prompt_length=dpo_config_values.get("max_length", training_config["max_seq_length"]) - 64,
         seed=training_config["seed"],
         report_to=training_config["logging_backend"],
         bf16=(precision == "bf16"),

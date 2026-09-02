@@ -54,8 +54,16 @@ sft:
   learning_rate: 2.0e-5               # plus eleve qu'en DPO: on apprend un format, pas une preference
   num_epochs: 2
   warmup_ratio: 0.03
-  batch_size: 2
-  gradient_accumulation_steps: 8
+  # Mesure sur la vraie tranche haoussa d'Aya: mediane 46 tokens, p99 1858. Le 2560 de
+  # training.max_seq_length avait ete mesure sur la tache gardien du sujet v1, qui embarquait
+  # des transcripts entiers -- il n'a plus de sens ici. A 1024, 2,5 % sont tronques, et ce
+  # sont des valeurs extremes.
+  max_length: 1024
+  # Batch 1: avec un vocabulaire de 248 044, les logits dominent la memoire. A batch 2 et
+  # seq 2560 ils pesaient 2,5 Go, doubles par leurs gradients -- c'est ce qui a fait OOM le
+  # premier run reel sur T4. A batch 1 et seq 1024, 0,5 Go. Lot effectif inchange a 16.
+  batch_size: 1
+  gradient_accumulation_steps: 16
   gradient_checkpointing: true
   logging_steps: 10
 
@@ -91,6 +99,9 @@ dpo:
   warmup_ratio: 0.03
   num_epochs: 3  # proposal section 10, E3
   eval_steps: 20
+  # Mesure sur les paires haoussa reelles (Uhura + UbuntuGuard): maximum 974 tokens, donc
+  # 1024 ne tronque rien du tout. Le 2560 herite du sujet v1 gaspillait 2,5x la memoire.
+  max_length: 1024
   # A 248,044-token vocabulary makes DPO logits the dominant memory cost, not the weights:
   # seq x vocab x 4 bytes is ~2.5 GB per sequence at 2560, and DPO holds chosen *and*
   # rejected, so ~5 GB per example. That is what OOM'd a 14.5 GB T4 at batch_size 2.
