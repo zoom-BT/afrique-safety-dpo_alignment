@@ -111,10 +111,15 @@ def build_metadata(
 
 def _run(args: list[str]) -> int:
     print("+", " ".join(args))
-    # The Kaggle CLI writes fetched logs through the console encoding. On Windows that is
-    # cp1252, which cannot represent Hausa text or the box-drawing characters notebooks
-    # emit -- the fetch then dies on 'charmap codec can't encode' and leaves a 0-byte log,
-    # which is how a failed run looks like no run at all.
+    # TEMPORARY, removable once kaggle > 2.2.4 ships. `kernels_output` writes the log with
+    # `open(outfile, "w")` and no encoding, so Python uses the locale default -- cp1252 on
+    # Windows, which cannot represent the block characters pip's progress bars emit. The
+    # fetch then dies on 'charmap codec can't encode' and leaves a 0-byte file, which makes
+    # a failed run look like no run at all.
+    #
+    # Upstream fix: Kaggle/kaggle-cli PR #1163, merged 2026-08-05. Version 2.2.4 was
+    # published 2026-07-23, two weeks earlier, so the released code still carries the bug.
+    # Check whether the installed version postdates the merge before deleting this.
     env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
     try:
         return subprocess.call(args, env=env)
