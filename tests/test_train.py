@@ -297,3 +297,154 @@ def test_sft_avoids_the_chunked_loss_that_breaks_multi_gpu():
 
     config = yaml.safe_load(open("config.yaml"))
     assert config["sft"]["loss_type"] == "nll"
+
+
+def _config_from_yaml():
+    import yaml
+
+    return yaml.safe_load(open("config.yaml"))
+
+
+def test_the_real_sft_config_can_actually_be_built():
+    """Construit le vrai SFTConfig depuis config.yaml, sans modele ni GPU.
+
+    Bien plus fort qu'une inspection de noms d'arguments: cela valide aussi les types, les
+    valeurs admises et les incompatibilites entre champs. Trois runs Kaggle sont morts sur
+    des erreurs que cette instanciation aurait levees en une seconde ici.
+    """
+    from trl import SFTConfig
+
+    c = _config_from_yaml()
+    sft, training = c["sft"], c["training"]
+    SFTConfig(
+        output_dir="/tmp/x",
+        per_device_train_batch_size=sft["batch_size"],
+        gradient_accumulation_steps=sft["gradient_accumulation_steps"],
+        gradient_checkpointing=sft.get("gradient_checkpointing", False),
+        num_train_epochs=sft["num_epochs"],
+        learning_rate=sft["learning_rate"],
+        warmup_steps=10,
+        max_length=sft.get("max_length", training["max_seq_length"]),
+        seed=training["seed"],
+        report_to=training["logging_backend"],
+        fp16=True,
+        logging_steps=sft.get("logging_steps", 10),
+        loss_type=sft.get("loss_type", "nll"),
+    )
+
+
+def test_the_real_dpo_config_can_actually_be_built():
+    from trl import DPOConfig
+
+    c = _config_from_yaml()
+    dpo, training = c["dpo"], c["training"]
+    DPOConfig(
+        output_dir="/tmp/x",
+        per_device_train_batch_size=dpo["batch_size"],
+        per_device_eval_batch_size=dpo["batch_size"],
+        gradient_accumulation_steps=dpo["gradient_accumulation_steps"],
+        gradient_checkpointing=dpo["gradient_checkpointing"],
+        beta=dpo["beta"],
+        num_train_epochs=dpo["num_epochs"],
+        learning_rate=dpo["learning_rate"],
+        warmup_steps=10,
+        max_length=dpo.get("max_length", training["max_seq_length"]),
+        seed=training["seed"],
+        report_to=training["logging_backend"],
+        fp16=True,
+        eval_strategy="no",
+        eval_steps=dpo["eval_steps"],
+    )
+
+
+def _trainer_kwargs(function_name: str) -> set[str]:
+    """Collect the keyword names our code passes to a TRL config, by reading the source."""
+    import ast
+    import inspect
+
+    from src import train
+
+    tree = ast.parse(inspect.getsource(getattr(train, function_name)))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "").endswith("Config"):
+            return {kw.arg for kw in node.keywords if kw.arg}
+    raise AssertionError(f"no *Config(...) call found in {function_name}")
+
+
+def test_every_dpo_argument_exists_in_the_installed_trl():
+    # max_prompt_length was passed on faith and does not exist in this TRL. The run reached
+    # the DPO step -- after loading Aya and 9 GB of weights -- before saying so.
+    import dataclasses
+
+    from trl import DPOConfig
+
+    known = {f.name for f in dataclasses.fields(DPOConfig)}
+    unknown = _trainer_kwargs("run_dpo") - known
+    assert not unknown, f"DPOConfig n'accepte pas: {sorted(unknown)}"
+
+
+def test_every_sft_argument_exists_in_the_installed_trl():
+    import dataclasses
+
+    from trl import SFTConfig
+
+    known = {f.name for f in dataclasses.fields(SFTConfig)}
+    unknown = _trainer_kwargs("run_sft") - known
+    assert not unknown, f"SFTConfig n'accepte pas: {sorted(unknown)}"
+
+
+def test_load_causal_lm_passes_arguments_transformers_actually_accepts(monkeypatch):
+    """Verifie les kwargs envoyes a from_pretrained, sans telecharger 9 Go.
+
+    Meme classe de bug que le `max_prompt_length` inexistant de DPOConfig: un nom
+    d'argument errone ne se manifeste qu'apres le chargement du modele, donc apres dix
+    minutes de run Kaggle.
+    """
+    import inspect
+
+    import transformers
+    import yaml
+
+    from src import train
+
+    captured = {}
+
+    class FakeModel:
+        def to(self, *_):
+            return self
+
+    def fake_from_pretrained(name, **kwargs):
+        captured["name"] = name
+        captured["kwargs"] = kwargs
+        return FakeModel()
+
+    monkeypatch.setattr(
+        transformers.AutoModelForCausalLM, "from_pretrained", staticmethod(fake_from_pretrained)
+    )
+    monkeypatch.setattr(train, "prepare_model_for_kbit_training", lambda m: m, raising=False)
+
+    config = yaml.safe_load(open("config.yaml"))["training"]
+    config = {**config, "load_in_4bit": False}   # evite le chemin peft
+    train.load_causal_lm("fake/model", config)
+
+    accepted = set(
+        inspect.signature(transformers.PreTrainedModel.from_pretrained).parameters
+    )
+    unknown = set(captured["kwargs"]) - accepted
+    # `dtype`, `quantization_config` et `device_map` passent par **kwargs cote transformers;
+    # on verifie surtout qu'on n'invente pas de nom fantaisiste.
+    assert unknown <= {"dtype", "quantization_config", "device_map"}, sorted(unknown)
+
+
+def test_list_lora_candidates_counts_linear_leaf_names():
+    """Un nom de module qui ne correspond a rien attacherait les adaptateurs a rien."""
+    import torch
+
+    from src.train import list_lora_candidates
+
+    model = torch.nn.Module()
+    model.q_proj = torch.nn.Linear(4, 4)
+    model.k_proj = torch.nn.Linear(4, 4)
+    model.norm = torch.nn.LayerNorm(4)
+    counts = list_lora_candidates(model)
+    assert counts == {"q_proj": 1, "k_proj": 1}

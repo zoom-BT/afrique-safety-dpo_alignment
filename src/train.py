@@ -471,10 +471,10 @@ def run_dpo(config: dict, pairs: list[dict] | None = None,
         learning_rate=dpo_config_values["learning_rate"],
         warmup_steps=warmup_steps,
         max_length=dpo_config_values.get("max_length", training_config["max_seq_length"]),
-        # Truncate the prompt, never the completion. The guardian task's answer is the last
-        # handful of tokens in the sequence, so a plain right-truncation would remove the
-        # entire training signal while leaving a sequence that still looks well formed.
-        max_prompt_length=dpo_config_values.get("max_length", training_config["max_seq_length"]) - 64,
+        # No truncation setting at all: the Hausa pairs peak at 974 tokens against a
+        # max_length of 1024, so truncation never triggers. TRL's only supported mode is
+        # `keep_start` anyway -- `keep_end` is deprecated for v2. An earlier version passed
+        # `max_prompt_length`, which does not exist in this TRL and cost a full run to find.
         seed=training_config["seed"],
         report_to=training_config["logging_backend"],
         bf16=(precision == "bf16"),
