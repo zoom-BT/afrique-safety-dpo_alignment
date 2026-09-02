@@ -89,10 +89,16 @@ sft:
   # epoques etait la seule des trois economies qui degradait le resultat.
   num_epochs: 2
   logging_steps: 10
-  # Le "chunked_nll" par defaut de TRL est incompatible avec device_map="auto": il patche
-  # model.forward en supposant une methode liee, alors qu'accelerate l'enveloppe dans un
-  # functools.partial. Inutile ici de toute facon, les logits ne faisant plus que 0,5 Go.
-  loss_type: nll
+  # chunked_nll retabli, c'est le defaut de TRL et il attaque la cause racine des trois
+  # derniers OOM: il decoupe la cross-entropy sur le vocabulaire, donc les logits complets
+  # -- batch x seq x 248 044 -- ne sont jamais materialises. C'est precisement le tenseur
+  # sur lequel les runs 15, 16 et 17 ont echoue, et auquel le gradient_checkpointing ne
+  # touche pas.
+  #
+  # Il avait ete desactive au run 8 pour une incompatibilite avec device_map="auto", qui
+  # enveloppe model.forward dans un functools.partial. On n'utilise plus "auto". Si l'erreur
+  # revient, elle survient a la construction du trainer, donc en quelques secondes.
+  loss_type: chunked_nll
 
 dpo:
   # Built locally by src/data.py from UbuntuGuard's released test JSONL, not pulled from

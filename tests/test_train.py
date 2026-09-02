@@ -294,14 +294,26 @@ def test_device_map_can_be_overridden_to_keep_a_measurement_comparable():
     assert resolve_device_map({"device_map": {"": 0}}) == {"": 0}
 
 
-def test_sft_avoids_the_chunked_loss_that_breaks_multi_gpu():
-    # TRL's default chunked_nll patches model.forward assuming a bound method, but
-    # device_map="auto" wraps it in a functools.partial for cross-device transfers. The
-    # patch then dies on AttributeError: 'functools.partial' has no attribute '__func__'.
+def test_chunked_loss_and_automatic_device_map_are_never_combined():
+    """Garde l'incompatibilite, pas un choix de valeur.
+
+    chunked_nll patche model.forward en supposant une methode liee; device_map="auto"
+    l'enveloppe dans un functools.partial pour les transferts entre appareils, et le patch
+    meurt sur AttributeError. Les deux sont utiles separement -- le premier evite de
+    materialiser 248 044 logits par position, le second repartit le modele -- mais jamais
+    ensemble.
+
+    Une version anterieure de ce test verrouillait loss_type == "nll", ce qui figeait un
+    choix que trois OOM consecutifs ont ensuite renverse.
+    """
     import yaml
 
     config = yaml.safe_load(open("config.yaml"))
-    assert config["sft"]["loss_type"] == "nll"
+    chunked = config["sft"].get("loss_type", "chunked_nll") == "chunked_nll"
+    auto_map = config["training"].get("device_map") == "auto"
+    assert not (chunked and auto_map), (
+        "chunked_nll avec device_map='auto' echoue a la construction du trainer"
+    )
 
 
 def _config_from_yaml():
