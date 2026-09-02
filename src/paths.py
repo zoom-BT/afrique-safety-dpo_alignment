@@ -40,26 +40,58 @@ def find_locally(marker_parts: tuple[str, ...], start: Path | None = None) -> Pa
     return None
 
 
+UBUNTUGUARD_FILE = "Ubuntu_guard_test_crosslingual.jsonl"
+
+
+def find_file(name: str, roots: list) -> Path | None:
+    """Search `roots` recursively for a file called `name`, returning its full path.
+
+    Returns the *file*, not a directory onto which a layout is then appended. Kaggle
+    extracts an uploaded `data.zip` without guaranteeing the original folder level
+    survives, so code assuming `<dataset>/data/<file>` breaks on the flat layout and vice
+    versa. Searching for the file itself removes the assumption entirely.
+    """
+    for root in roots:
+        if root and Path(root).exists():
+            for hit in Path(root).rglob(name):
+                return hit
+    return None
+
+
+def describe(root: Path, depth: int = 2) -> str:
+    """List what is actually under `root`, so a failure reports reality instead of a guess."""
+    if not root.exists():
+        return f"    {root} does not exist"
+    lines = [
+        f"    {path.relative_to(root)}{'/' if path.is_dir() else ''}"
+        for path in sorted(root.rglob("*"))[:40]
+        if len(path.relative_to(root).parts) <= depth
+    ]
+    return "\n".join(lines) or f"    {root} is empty"
+
+
 def resolve_roots(cwd: Path | None = None) -> dict:
-    """Return `{"code": ..., "data": ..., "output": ...}` for the current environment.
+    """Return `{"code": ..., "ubuntuguard": ..., "output": ...}` for the current environment.
 
     Datasets are looked up first, the local tree second: on Kaggle both are mounted
     read-only under /kaggle/input, and anything written must go to /kaggle/working.
     """
     code = find_in_datasets("*/src/data.py") or find_locally(("src", "data.py"), cwd)
-    data = find_in_datasets("*/data/Ubuntu_guard_test_crosslingual.jsonl") or find_locally(
-        ("data", "Ubuntu_guard_test_crosslingual.jsonl"), cwd
-    )
     if code is None:
         raise RuntimeError(
             "code not found. On Kaggle, attach the dataset holding src/ "
-            "(afrique-safety-dpo-code); locally, run from inside the repository."
+            f"(afrique-safety-dpo-code). Contents of {KAGGLE_INPUT}:\n"
+            + describe(KAGGLE_INPUT)
         )
-    if data is None:
+
+    here = cwd or Path.cwd()
+    ubuntuguard = find_file(UBUNTUGUARD_FILE, [KAGGLE_INPUT, here, code])
+    if ubuntuguard is None:
         raise RuntimeError(
-            "data not found. On Kaggle, attach the dataset holding data/ "
-            "(afrique-safety-dpo-data) -- it is separate from the code dataset, which is "
-            "republished on every iteration and no longer carries it."
+            f"{UBUNTUGUARD_FILE} not found. On Kaggle, attach afrique-safety-dpo-data -- "
+            "it is separate from the code dataset, which no longer carries it since the "
+            f"split. Contents of {KAGGLE_INPUT}:\n" + describe(KAGGLE_INPUT)
         )
+
     output = KAGGLE_WORKING if KAGGLE_WORKING.exists() else (code / "results")
-    return {"code": code, "data": data, "output": output}
+    return {"code": code, "ubuntuguard": ubuntuguard, "output": output}

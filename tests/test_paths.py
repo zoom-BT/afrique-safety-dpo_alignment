@@ -6,7 +6,7 @@ runs. Every failure mode below is one that actually happened.
 
 import pytest
 
-from src.paths import find_in_datasets, find_locally, resolve_roots
+from src.paths import find_file, find_in_datasets, find_locally, resolve_roots
 
 
 def test_find_in_datasets_returns_the_dataset_dir_not_its_parent(tmp_path):
@@ -41,10 +41,29 @@ def test_resolve_roots_names_the_missing_dataset(tmp_path):
         resolve_roots(cwd=tmp_path)
 
 
-def test_resolve_roots_finds_both_locally(tmp_path):
+def test_find_file_handles_the_nested_layout(tmp_path):
+    # <dataset>/data/<file> -- what we upload
+    target = tmp_path / "ds" / "data" / "x.jsonl"
+    target.parent.mkdir(parents=True)
+    target.touch()
+    assert find_file("x.jsonl", [tmp_path]) == target
+
+
+def test_find_file_handles_the_flat_layout(tmp_path):
+    # <dataset>/<file> -- what Kaggle may produce when it extracts data.zip, which is the
+    # layout that broke the previous version's fixed */data/<file> glob.
+    target = tmp_path / "ds" / "x.jsonl"
+    target.parent.mkdir(parents=True)
+    target.touch()
+    assert find_file("x.jsonl", [tmp_path]) == target
+
+
+def test_resolve_roots_returns_the_file_itself_not_a_directory(tmp_path):
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "data.py").touch()
     (tmp_path / "data").mkdir()
-    (tmp_path / "data" / "Ubuntu_guard_test_crosslingual.jsonl").touch()
+    ug = tmp_path / "data" / "Ubuntu_guard_test_crosslingual.jsonl"
+    ug.touch()
     roots = resolve_roots(cwd=tmp_path)
-    assert roots["code"] == tmp_path and roots["data"] == tmp_path
+    assert roots["code"] == tmp_path
+    assert roots["ubuntuguard"] == ug
