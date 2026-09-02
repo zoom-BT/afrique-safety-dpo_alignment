@@ -63,15 +63,20 @@ sft:
   # des transcripts entiers -- il n'a plus de sens ici. A 1024, 2,5 % sont tronques, et ce
   # sont des valeurs extremes.
   max_length: 1024
-  # Batch 1: avec un vocabulaire de 248 044, les logits dominent la memoire. A batch 2 et
-  # seq 2560 ils pesaient 2,5 Go, doubles par leurs gradients -- c'est ce qui a fait OOM le
-  # premier run reel sur T4. A batch 1 et seq 1024, 0,5 Go. Lot effectif inchange a 16.
-  batch_size: 1
-  gradient_accumulation_steps: 16
-  # Desactive: mesure a 45,3 s/pas avec, ce qui donnait 4,4 h de SFT par bras. Le
-  # checkpointing echange du calcul contre de la memoire, or la memoire n'est plus le
-  # facteur limitant depuis seq 1024 + batch 1. Remettre a true si l'OOM revient.
-  gradient_checkpointing: false
+  # A batch 4 et seq 1024, les logits font 2 Go, doubles par leurs gradients. Avec le
+  # checkpointing qui garde les activations basses, cela devrait tenir dans 15,6 Go --
+  # a verifier, c'est precisement ce que le filtre 3 mesure.
+  batch_size: 4
+  gradient_accumulation_steps: 4
+  # HYPOTHESE A MESURER, pas un fait: mes deux dernieres predictions sur ce terrain etaient
+  # fausses. Mesure: batch 1 + checkpointing desactive donne 97,8 s/pas et 13,06 Go, contre
+  # 45,3 s/pas a batch 2. Le lot effectif etait identique (16), donc la variable dominante
+  # semble etre le batch: 16 micro-lots sequentiels au lieu de 8 laissent le T4
+  # sous-utilise. Le checkpointing, lui, tenait la memoire basse.
+  #
+  # On inverse donc: checkpointing active pour liberer de la memoire, batch 4 pour occuper
+  # le GPU. Lot effectif toujours 16.
+  gradient_checkpointing: true
   # Deux epoques, retablies apres correction d'une erreur de cadrage: j'avais compare le
   # cout total au quota d'UNE semaine (30 h) alors que le stage en compte trois, soit 90 h.
   # Au pire scenario, deux bras sur trois graines coutent 47 h -- ils tiennent. Reduire les

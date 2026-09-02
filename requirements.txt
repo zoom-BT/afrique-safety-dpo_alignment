@@ -1,16 +1,18 @@
-# Lower bounds, not exact pins: Kaggle images ship their own CUDA-matched torch, and
-# pinning it exactly forces a multi-GB reinstall at the start of every session.
+# Versions EXACTES de l'image Kaggle, relevees dans le log d'un run reel. Des bornes
+# basses ne suffisent pas: les tests construisent les vrais SFTConfig et DPOConfig, donc
+# valider contre une autre version que celle qui execute ne prouve rien. Trois runs sont
+# morts sur des champs qui existaient ici et pas la-bas.
 #
-# transformers is the one that genuinely matters. Both backbones are `model_type:
-# qwen3_5`, which older releases do not know at all -- on an image that ships
-# transformers 4.x the model does not load, it errors out. Kaggle's own generated snippet
-# opens with `pip install -U transformers` for exactly this reason.
+# A reverifier quand Kaggle met a jour son image: le notebook imprime les versions au
+# demarrage, c'est la source de verite.
+transformers==5.16.1
+trl==1.12.0
+peft==0.20.0
+# Non epingles: fournis par l'image Kaggle avec un CUDA accorde, les figer forcerait une
+# reinstallation de plusieurs Go a chaque session.
 torch>=2.6
-transformers>=5.12.1
 datasets>=4.0
 accelerate>=1.0
-peft>=0.15
-trl>=1.0
 bitsandbytes>=0.45
 wandb
 tensorboard

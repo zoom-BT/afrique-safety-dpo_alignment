@@ -251,14 +251,19 @@ def test_each_task_has_its_own_measured_sequence_length():
     assert config["dpo"]["max_length"] < config["training"]["max_seq_length"]
 
 
-def test_sft_batch_is_one_because_the_vocabulary_dominates_memory():
-    # 248,044 logits per position: at batch 2 and seq 2560 that is 2.5 GB before gradients.
+def test_the_effective_sft_batch_stays_at_sixteen():
+    """Le lot effectif fixe la dynamique d'entrainement; batch et accumulation sont un
+    compromis memoire/vitesse qui peut bouger, leur produit non.
+
+    Une version anterieure de ce test verrouillait batch_size == 1, ce qui figeait une
+    conclusion que la mesure a ensuite renversee: batch 1 donne 97,8 s/pas contre 45,3 a
+    batch 2, a lot effectif identique.
+    """
     import yaml
 
-    config = yaml.safe_load(open("config.yaml"))
-    assert config["sft"]["batch_size"] == 1
-    effective = config["sft"]["batch_size"] * config["sft"]["gradient_accumulation_steps"]
-    assert effective == 16, "le lot effectif doit rester a 16"
+    config = yaml.safe_load(open("config.yaml"))["sft"]
+    effective = config["batch_size"] * config["gradient_accumulation_steps"]
+    assert effective == 16, f"lot effectif {effective}, attendu 16"
 
 
 def test_device_map_spreads_across_gpus_when_there_are_several(monkeypatch):
