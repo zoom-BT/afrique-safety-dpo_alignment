@@ -372,6 +372,16 @@ def run_sft(config: dict, examples: list[dict], model_path: str | None = None,
         bf16=(precision == "bf16"),
         fp16=(precision == "fp16"),
         logging_steps=sft_config.get("logging_steps", 10),
+        # "nll" plutot que le "chunked_nll" par defaut de TRL. Le chunking existe pour
+        # economiser la memoire sur les gros vocabulaires -- le notre en compte 248 044 --
+        # mais il patche model.forward en supposant une methode liee, or device_map="auto"
+        # l'enveloppe dans un functools.partial pour gerer les transferts entre GPU. Le
+        # patch tombe alors sur AttributeError: 'functools.partial' object has no attribute
+        # '__func__'. TRL le signale lui-meme comme alternative dans son message d'erreur.
+        #
+        # L'optimisation n'est plus necessaire ici: a batch 1 et seq 1024 les logits font
+        # 0,5 Go, contre 2,5 Go dans la configuration qui avait rendu le chunking utile.
+        loss_type=sft_config.get("loss_type", "nll"),
     )
 
     trainer = SFTTrainer(

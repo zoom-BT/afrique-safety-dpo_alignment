@@ -66,6 +66,10 @@ sft:
   gradient_accumulation_steps: 16
   gradient_checkpointing: true
   logging_steps: 10
+  # Le "chunked_nll" par defaut de TRL est incompatible avec device_map="auto": il patche
+  # model.forward en supposant une methode liee, alors qu'accelerate l'enveloppe dans un
+  # functools.partial. Inutile ici de toute facon, les logits ne faisant plus que 0,5 Go.
+  loss_type: nll
 
 dpo:
   # Built locally by src/data.py from UbuntuGuard's released test JSONL, not pulled from

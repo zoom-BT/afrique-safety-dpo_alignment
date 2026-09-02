@@ -287,3 +287,13 @@ def test_device_map_can_be_overridden_to_keep_a_measurement_comparable():
     from src.train import resolve_device_map
 
     assert resolve_device_map({"device_map": {"": 0}}) == {"": 0}
+
+
+def test_sft_avoids_the_chunked_loss_that_breaks_multi_gpu():
+    # TRL's default chunked_nll patches model.forward assuming a bound method, but
+    # device_map="auto" wraps it in a functools.partial for cross-device transfers. The
+    # patch then dies on AttributeError: 'functools.partial' has no attribute '__func__'.
+    import yaml
+
+    config = yaml.safe_load(open("config.yaml"))
+    assert config["sft"]["loss_type"] == "nll"
