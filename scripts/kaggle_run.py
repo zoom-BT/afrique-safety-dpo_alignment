@@ -19,6 +19,7 @@ Prerequisites, both on the operator's machine and never committed:
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -96,8 +97,13 @@ def build_metadata(
 
 def _run(args: list[str]) -> int:
     print("+", " ".join(args))
+    # The Kaggle CLI writes fetched logs through the console encoding. On Windows that is
+    # cp1252, which cannot represent Hausa text or the box-drawing characters notebooks
+    # emit -- the fetch then dies on 'charmap codec can't encode' and leaves a 0-byte log,
+    # which is how a failed run looks like no run at all.
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
     try:
-        return subprocess.call(args)
+        return subprocess.call(args, env=env)
     except FileNotFoundError:
         print(
             "kaggle CLI not found. Install it with `pip install kaggle`, then place your "
