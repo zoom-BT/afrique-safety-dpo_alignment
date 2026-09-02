@@ -375,6 +375,88 @@ def build_uhura_pairs(rows: list[dict], language: str) -> list[dict]:
     return pairs
 
 
+def build_aya_sft_examples(rows: list[dict], language: str = "Hausa") -> list[dict]:
+    """Build SFT demonstrations from the Aya dataset, keeping one language.
+
+    Aya is the cleanest source in this project: prompts and completions written by fluent
+    native speakers rather than translated, human-validated, Apache-2.0. Its Hausa slice is
+    3,512 rows — measured against the datasets-server, not taken from a summary.
+
+    Schema: `inputs`, `targets`, `language`, `language_code`, `annotation_type`, `user_id`.
+    Emits TRL's prompt/completion conversational form so the same rows can feed `SFTTrainer`
+    without a second reshaping step.
+    """
+    examples = []
+    for row in rows:
+        if row.get("language") != language:
+            continue
+        prompt = (row.get("inputs") or "").strip()
+        target = (row.get("targets") or "").strip()
+        if not prompt or not target:
+            continue
+        examples.append(
+            {
+                "prompt": [{"role": "user", "content": prompt}],
+                "completion": [{"role": "assistant", "content": target}],
+                "language": language,
+                # No stable id column, so the prompt text is the identity used for splitting.
+                "base_stem": prompt,
+                "row_id": f"aya::{language}::{prompt[:80]}",
+                "theme": "instruction following",
+                "domain": row.get("annotation_type", "unknown"),
+            }
+        )
+    return examples
+
+
+def _afrisynt_text(value) -> str:
+    """Pull the text out of an afrisynt field, which is a {from, value} turn or a list of them."""
+    if isinstance(value, dict):
+        return (value.get("value") or "").strip()
+    if isinstance(value, list) and value:
+        return _afrisynt_text(value[-1])
+    if isinstance(value, str):
+        return value.strip()
+    return ""
+
+
+def build_afrisynt_pairs(rows: list[dict], language: str = "Hausa") -> list[dict]:
+    """Build DPO pairs from afrisynt/dpo, keeping one language.
+
+    This one measures **language adherence**, not safety: the prompt demands an answer in the
+    target language, `chosen` complies, and `rejected` typically answers in English or
+    degenerates into repetition. That is the Helpful axis of HHH, and it is the axis most
+    directly tied to what continued pre-training is supposed to provide.
+
+    ⚠️ Supplement only, never the licence-clean core: the repository states **no licence**,
+    the data is entirely synthetic, and no human validation is reported. Runs using it are
+    reported separately so the headline result never depends on it.
+    """
+    pairs = []
+    for row in rows:
+        if row.get("language") != language:
+            continue
+        prompt = _afrisynt_text(row.get("conversations"))
+        chosen = _afrisynt_text(row.get("chosen"))
+        rejected = _afrisynt_text(row.get("rejected"))
+        if not prompt or not chosen or not rejected or chosen == rejected:
+            continue
+        pairs.append(
+            {
+                "prompt": [{"role": "user", "content": prompt}],
+                "chosen": [{"role": "assistant", "content": chosen}],
+                "rejected": [{"role": "assistant", "content": rejected}],
+                "language": language,
+                "base_stem": prompt,
+                "row_id": f"afrisynt::{language}::{prompt[:80]}",
+                "theme": "language adherence",
+                "domain": row.get("task_type", "unknown"),
+                "comet": row.get("ssa_comet_score"),
+            }
+        )
+    return pairs
+
+
 def load_ubuntuguard_rows(path: str | Path) -> list[dict]:
     """Read one UbuntuGuard `.jsonl` file into a list of row dicts."""
     with open(path, encoding="utf-8") as f:

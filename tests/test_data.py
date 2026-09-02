@@ -345,3 +345,91 @@ def test_build_uhura_pairs_keys_the_stem_on_the_question_not_the_language():
 def test_build_uhura_pairs_skips_rows_with_nothing_to_contrast():
     assert build_uhura_pairs([{**UHURA_ROW, "incorrect_answers": []}], "Hausa") == []
     assert build_uhura_pairs([{**UHURA_ROW, "best_answer": "  "}], "Hausa") == []
+
+
+# --- Aya (SFT) and afrisynt (DPO), sujet v2 ---------------------------------------------
+
+
+AYA_ROW = {
+    "inputs": "Me ake nufi da sunadarai?",
+    "targets": "Sunadarai su ne kwayoyin halitta...",
+    "language": "Hausa",
+    "language_code": "hau",
+    "annotation_type": "original-annotations",
+}
+
+
+def test_build_aya_sft_examples_emits_prompt_completion_form():
+    from src.data import build_aya_sft_examples
+
+    ex = build_aya_sft_examples([AYA_ROW])[0]
+    assert ex["prompt"] == [{"role": "user", "content": "Me ake nufi da sunadarai?"}]
+    assert ex["completion"][0]["role"] == "assistant"
+
+
+def test_build_aya_sft_examples_keeps_only_the_requested_language():
+    from src.data import build_aya_sft_examples
+
+    rows = [AYA_ROW, {**AYA_ROW, "language": "Swahili"}]
+    assert len(build_aya_sft_examples(rows, "Hausa")) == 1
+    assert len(build_aya_sft_examples(rows, "Swahili")) == 1
+
+
+def test_build_aya_sft_examples_skips_empty_sides():
+    from src.data import build_aya_sft_examples
+
+    assert build_aya_sft_examples([{**AYA_ROW, "targets": "   "}]) == []
+
+
+def test_build_aya_stem_is_the_prompt_since_there_is_no_id_column():
+    from src.data import build_aya_sft_examples
+
+    ex = build_aya_sft_examples([AYA_ROW])[0]
+    assert ex["base_stem"] == "Me ake nufi da sunadarai?"
+
+
+AFRISYNT_ROW = {
+    "conversations": [{"from": "human", "value": "Menene amfanin wannan?"}],
+    "chosen": {"from": "gpt", "value": "Amfaninsa shi ne..."},
+    "rejected": {"from": "gpt", "value": "The benefits are as follows..."},
+    "language": "Hausa",
+    "task_type": "item",
+    "ssa_comet_score": 0.56,
+}
+
+
+def test_build_afrisynt_pairs_unwraps_the_from_value_turns():
+    from src.data import build_afrisynt_pairs
+
+    pair = build_afrisynt_pairs([AFRISYNT_ROW])[0]
+    assert pair["prompt"][0]["content"] == "Menene amfanin wannan?"
+    assert pair["chosen"][0]["content"] == "Amfaninsa shi ne..."
+    # The rejected side is the English fallback this dataset exists to penalise.
+    assert pair["rejected"][0]["content"].startswith("The benefits")
+
+
+def test_build_afrisynt_pairs_drops_rows_where_both_sides_match():
+    from src.data import build_afrisynt_pairs
+
+    same = {**AFRISYNT_ROW, "rejected": {"from": "gpt", "value": "Amfaninsa shi ne..."}}
+    assert build_afrisynt_pairs([same]) == []
+
+
+def test_build_afrisynt_pairs_filters_by_language():
+    from src.data import build_afrisynt_pairs
+
+    rows = [AFRISYNT_ROW, {**AFRISYNT_ROW, "language": "Amharic"}]
+    assert len(build_afrisynt_pairs(rows, "Hausa")) == 1
+
+
+def test_afrisynt_and_aya_examples_work_with_the_existing_splitter():
+    # Both carry base_stem and language, so the contamination-free splitter applies
+    # unchanged -- no second splitting implementation for the new sources.
+    from src.data import build_afrisynt_pairs, split_by_base_stem
+
+    rows = [
+        {**AFRISYNT_ROW, "conversations": [{"from": "human", "value": f"Q{i}"}]}
+        for i in range(30)
+    ]
+    train, evaluation = split_by_base_stem(build_afrisynt_pairs(rows))
+    assert {p["base_stem"] for p in train} & {p["base_stem"] for p in evaluation} == set()
