@@ -357,7 +357,9 @@ def run_sft(config: dict, examples: list[dict], model_path: str | None = None,
         output_dir=output_dir,
         per_device_train_batch_size=sft_config["batch_size"],
         gradient_accumulation_steps=sft_config["gradient_accumulation_steps"],
-        gradient_checkpointing=sft_config["gradient_checkpointing"],
+        # Desactive: il echange du calcul contre de la memoire, au prix d'environ 30 %
+        # de vitesse. La memoire n'est plus le facteur limitant, le temps l'est.
+        gradient_checkpointing=sft_config.get("gradient_checkpointing", False),
         num_train_epochs=sft_config["num_epochs"],
         max_steps=max_steps,
         learning_rate=sft_config["learning_rate"],
@@ -397,8 +399,14 @@ def run_sft(config: dict, examples: list[dict], model_path: str | None = None,
     return trainer
 
 
-def run_dpo(config: dict, model_path: str | None = None, max_steps: int = -1):
+def run_dpo(config: dict, pairs: list[dict] | None = None,
+            model_path: str | None = None, max_steps: int = -1):
     """Run DPO alignment with `trl.DPOTrainer`, using `config['dpo']` for hyperparameters.
+
+    `pairs` mirrors `run_sft`'s `examples`: the caller has already split them
+    contamination-free and must not have that redone here with a different seed. Loading
+    them internally also broke on Kaggle, where the config's relative path does not resolve
+    from /kaggle/working -- the data lives read-only under /kaggle/input.
 
     `model_path` (defaults to `config['model']['base_model_name']`) is the checkpoint to
     start from. Passing `ref_model=None` to `DPOTrainer` makes it create its own frozen
@@ -424,17 +432,22 @@ def run_dpo(config: dict, model_path: str | None = None, max_steps: int = -1):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = load_causal_lm(model_name, training_config, dtype=dtype)
 
-    train_pairs, eval_pairs = build_ubuntuguard_dpo_datasets(
-        dpo_config_values["ubuntuguard_path"], seed=training_config["seed"]
-    )
+    if pairs is None:
+        train_pairs, eval_pairs = build_ubuntuguard_dpo_datasets(
+            dpo_config_values["ubuntuguard_path"], seed=training_config["seed"]
+        )
+    else:
+        train_pairs, eval_pairs = pairs, []
     # train_size/eval_size cap the split rather than defining it, so the A1 ablation
     # (100/200/868) is a config change rather than a re-split -- re-splitting would shuffle
     # which row_ids sit in eval and make the ablation points incomparable.
     train_dataset = build_dpo_dataset_from_pairs(
         train_pairs[: dpo_config_values["train_size"]]
     )
-    eval_dataset = build_dpo_dataset_from_pairs(
-        eval_pairs[: dpo_config_values["eval_size"]]
+    eval_dataset = (
+        build_dpo_dataset_from_pairs(eval_pairs[: dpo_config_values["eval_size"]])
+        if eval_pairs
+        else None
     )
 
     warmup_steps = compute_warmup_steps(
@@ -466,7 +479,7 @@ def run_dpo(config: dict, model_path: str | None = None, max_steps: int = -1):
         report_to=training_config["logging_backend"],
         bf16=(precision == "bf16"),
         fp16=(precision == "fp16"),
-        eval_strategy="steps",
+        eval_strategy="steps" if eval_pairs else "no",
         eval_steps=dpo_config_values["eval_steps"],
     )
 
