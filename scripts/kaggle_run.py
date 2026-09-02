@@ -282,7 +282,9 @@ def main() -> int:
     p.add_argument(
         "--dataset", action="append",
         help="Kaggle dataset source, repeatable. Use this instead of cloning: it needs no "
-             "secret, which the API cannot attach anyway",
+             "secret, which the API cannot attach anyway. NOTE: the kernel picks up the "
+             "dataset's latest published version, so run `dataset -m ...` first whenever "
+             "src/ or config.yaml changed -- otherwise the run silently uses stale code",
     )
     p.add_argument(
         "--staging", default=".kaggle_staging",
@@ -294,7 +296,7 @@ def main() -> int:
     d.add_argument("--slug", help="dataset slug (default afrique-safety-dpo-code)")
     d.add_argument("--title")
     d.add_argument("--create", action="store_true", help="first upload; omit to add a version")
-    d.add_argument("--message", default="update", help="version message")
+    d.add_argument("-m", "--message", default="update", help="version message")
     d.add_argument("--staging", default=".kaggle_staging")
     d.add_argument("--dry-run", action="store_true")
     d.set_defaults(func=dataset)

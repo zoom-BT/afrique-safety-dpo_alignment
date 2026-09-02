@@ -70,3 +70,13 @@ def test_push_has_a_dry_run_so_checking_costs_nothing():
 
     src = inspect.getsource(main)
     assert "--dry-run" in src
+
+
+def test_dataset_message_accepts_the_short_flag():
+    # Suggesting -m while argparse only knew --message cost a wasted GPU run: the dataset
+    # push failed, the kernel push succeeded, and the run executed stale code.
+    import inspect
+
+    from kaggle_run import main
+
+    assert '"-m", "--message"' in inspect.getsource(main)
