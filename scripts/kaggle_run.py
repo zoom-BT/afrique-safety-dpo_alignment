@@ -176,9 +176,14 @@ def push(args) -> int:
     return _run(command)
 
 
-# Files the notebooks actually import or read. Deliberately not the whole repository:
-# notebooks/ holds a 3.4 MB PDF and .git is irrelevant on the Kaggle side.
-DATASET_CONTENT = ["src", "data", "config.yaml", "requirements.txt"]
+# Two datasets rather than one, because they change at completely different rates. The
+# code is ~30 KB and gets republished on every debugging iteration; `data/` is 6 MB of
+# UbuntuGuard JSONL that has not changed since it was vendored. Bundling them made each
+# iteration re-upload the 6 MB for nothing -- about 50 seconds per cycle on this link.
+DATASET_KINDS = {
+    "code": ["src", "config.yaml", "requirements.txt"],
+    "data": ["data"],
+}
 
 
 def dataset(args) -> int:
@@ -193,12 +198,13 @@ def dataset(args) -> int:
     A dataset has none of that problem: `dataset_sources` is a real metadata field the API
     honours, and the content lands read-only under /kaggle/input. No token, no manual step.
     """
-    staging = Path(args.staging) / "dataset"
+    kind = args.kind
+    staging = Path(args.staging) / f"dataset-{kind}"
     if staging.exists():
         shutil.rmtree(staging)
     staging.mkdir(parents=True)
 
-    for name in DATASET_CONTENT:
+    for name in DATASET_KINDS[kind]:
         source = Path(name)
         if not source.exists():
             print(f"skipping {name}: not present", file=sys.stderr)
@@ -212,7 +218,7 @@ def dataset(args) -> int:
         else:
             shutil.copy2(source, staging / name)
 
-    slug = args.slug or "afrique-safety-dpo-code"
+    slug = args.slug or f"afrique-safety-dpo-{kind}"
     metadata = {
         "title": args.title or slug,
         "id": f"{args.username}/{slug}",
@@ -292,8 +298,12 @@ def main() -> int:
     )
     p.set_defaults(func=push)
 
-    d = sub.add_parser("dataset", help="package the code as a private Kaggle Dataset")
-    d.add_argument("--slug", help="dataset slug (default afrique-safety-dpo-code)")
+    d = sub.add_parser("dataset", help="package code or data as a private Kaggle Dataset")
+    d.add_argument(
+        "kind", choices=sorted(DATASET_KINDS), default="code", nargs="?",
+        help="code changes every iteration and is tiny; data is static and 6 MB",
+    )
+    d.add_argument("--slug", help="dataset slug (default afrique-safety-dpo-<kind>)")
     d.add_argument("--title")
     d.add_argument("--create", action="store_true", help="first upload; omit to add a version")
     d.add_argument("-m", "--message", default="update", help="version message")
