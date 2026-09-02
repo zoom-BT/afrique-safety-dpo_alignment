@@ -63,11 +63,17 @@ sft:
   # des transcripts entiers -- il n'a plus de sens ici. A 1024, 2,5 % sont tronques, et ce
   # sont des valeurs extremes.
   max_length: 1024
-  # A batch 4 et seq 1024, les logits font 2 Go, doubles par leurs gradients. Avec le
-  # checkpointing qui garde les activations basses, cela devrait tenir dans 15,6 Go --
-  # a verifier, c'est precisement ce que le filtre 3 mesure.
-  batch_size: 4
-  gradient_accumulation_steps: 4
+  # Batch 2, pas 4: l'OOM du run 15 a montre que le gradient_checkpointing ne protege PAS
+  # de ce tenseur-la. Il recalcule les activations intermediaires, mais les logits de la
+  # perte -- batch x seq x 248 044 -- sont materialises d'un bloc par cross_entropy. A
+  # batch 4 et seq 1024 cela fait 4 Go en fp32; l'allocation demandee etait de 3,26 Gio.
+  #
+  # Trois points mesures: batch 2/seq 2560/2 GPU passe a 45,3 s/pas; batch 1/seq 1024/1 GPU
+  # passe a 97,8 s/pas; batch 4/seq 1024/1 GPU echoue. Batch 2 a seq 1024 a moitie moins de
+  # positions de logits que le cas qui echoue, et deux fois plus de parallelisme que le cas
+  # lent. Pas intermediaire, sans nouvelle theorie.
+  batch_size: 2
+  gradient_accumulation_steps: 8
   # HYPOTHESE A MESURER, pas un fait: mes deux dernieres predictions sur ce terrain etaient
   # fausses. Mesure: batch 1 + checkpointing desactive donne 97,8 s/pas et 13,06 Go, contre
   # 45,3 s/pas a batch 2. Le lot effectif etait identique (16), donc la variable dominante
