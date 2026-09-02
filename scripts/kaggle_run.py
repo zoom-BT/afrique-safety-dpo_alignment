@@ -146,7 +146,9 @@ def fetch(args) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--username", default="zoombt", help="Kaggle username owning the kernel"
+        "--username",
+        default="balbinotchoutzine",
+        help="Kaggle username owning the kernel (not the GitHub org, which differs)",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

@@ -262,6 +262,96 @@ def build_dpo_dataset_from_pairs(pairs: list[dict]):
     return Dataset.from_list([{k: p[k] for k in DPO_COLUMNS} for p in pairs])
 
 
+SFT_COLUMNS = ("prompt", "completion")
+
+
+def build_sft_dataset_from_examples(examples: list[dict]):
+    """Turn `src.data` SFT demonstrations into a `datasets.Dataset` for `SFTTrainer`.
+
+    Keeps only the two columns TRL consumes, dropping the bookkeeping fields the splitter
+    needs (`base_stem`, `language`, ...) — left in place they would be tokenized as if they
+    were training text.
+    """
+    from datasets import Dataset
+
+    return Dataset.from_list([{k: e[k] for k in SFT_COLUMNS} for e in examples])
+
+
+def run_sft(config: dict, examples: list[dict], model_path: str | None = None,
+            max_steps: int = -1):
+    """Supervised fine-tuning — the first of the two InstructGPT-style stages.
+
+    Not optional here, and not a formality. Both backbones are *base* checkpoints: the
+    smoke test showed them drifting into free-form reasoning instead of answering in the
+    requested shape. DPO on a model that cannot follow an instruction would optimise a
+    preference between two malformed outputs.
+
+    Takes `examples` as an argument rather than loading them, because the caller has
+    already split them contamination-free and must not have that redone here with a
+    different seed.
+    """
+    import torch
+    from transformers import AutoTokenizer
+    from trl import SFTConfig, SFTTrainer
+
+    from src.utils import set_seed
+
+    training_config = config["training"]
+    sft_config = config["sft"]
+    set_seed(training_config["seed"])
+
+    precision = resolve_precision(training_config["precision"])
+    dtype = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}[precision]
+
+    model_name = model_path or config["model"]["base_model_name"]
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    if tokenizer.pad_token is None:
+        # Base checkpoints often ship without one, and the collator needs it to batch.
+        tokenizer.pad_token = tokenizer.eos_token
+
+    model = load_causal_lm(model_name, training_config, dtype=dtype)
+    train_dataset = build_sft_dataset_from_examples(examples[: sft_config["train_size"]])
+
+    warmup_steps = compute_warmup_steps(
+        dataset_size=len(train_dataset),
+        batch_size=sft_config["batch_size"],
+        gradient_accumulation_steps=sft_config["gradient_accumulation_steps"],
+        num_epochs=sft_config["num_epochs"],
+        warmup_ratio=sft_config.get("warmup_ratio", 0.0),
+        max_steps=max_steps,
+    )
+
+    output_dir = config["paths"]["output_dir"] + "sft_checkpoints"
+    args = SFTConfig(
+        output_dir=output_dir,
+        per_device_train_batch_size=sft_config["batch_size"],
+        gradient_accumulation_steps=sft_config["gradient_accumulation_steps"],
+        gradient_checkpointing=sft_config["gradient_checkpointing"],
+        num_train_epochs=sft_config["num_epochs"],
+        max_steps=max_steps,
+        learning_rate=sft_config["learning_rate"],
+        warmup_steps=warmup_steps,
+        max_length=training_config["max_seq_length"],
+        seed=training_config["seed"],
+        report_to=training_config["logging_backend"],
+        bf16=(precision == "bf16"),
+        fp16=(precision == "fp16"),
+        logging_steps=sft_config.get("logging_steps", 10),
+    )
+
+    trainer = SFTTrainer(
+        model=model,
+        args=args,
+        train_dataset=train_dataset,
+        peft_config=build_peft_config(training_config),
+        processing_class=tokenizer,
+    )
+    trainer.train()
+    trainer.save_model(output_dir + "/final")
+    save_training_curves(trainer.state.log_history, config["paths"]["output_dir"] + "sft")
+    return trainer
+
+
 def run_dpo(config: dict, model_path: str | None = None, max_steps: int = -1):
     """Run DPO alignment with `trl.DPOTrainer`, using `config['dpo']` for hyperparameters.
 

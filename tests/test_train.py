@@ -210,3 +210,30 @@ def test_resolve_precision_keeps_bf16_where_it_is_supported(monkeypatch):
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: True)
     assert train.resolve_precision("bf16") == "bf16"
+
+
+def test_build_sft_dataset_keeps_only_the_columns_trl_consumes():
+    # base_stem, language and friends exist for the splitter; left in place TRL would
+    # tokenize them as if they were training text.
+    from src.train import build_sft_dataset_from_examples
+
+    examples = [
+        {
+            "prompt": [{"role": "user", "content": "Q"}],
+            "completion": [{"role": "assistant", "content": "A"}],
+            "base_stem": "Q",
+            "language": "Hausa",
+            "row_id": "aya::Hausa::Q",
+        }
+    ]
+    ds = build_sft_dataset_from_examples(examples)
+    assert set(ds.column_names) == {"prompt", "completion"}
+
+
+def test_sft_and_dpo_use_different_learning_rates_by_design():
+    # SFT teaches a response format, DPO nudges a preference: an SFT-sized step in DPO
+    # would overwrite the behaviour SFT just installed.
+    import yaml
+
+    config = yaml.safe_load(open("config.yaml"))
+    assert config["sft"]["learning_rate"] > config["dpo"]["learning_rate"]

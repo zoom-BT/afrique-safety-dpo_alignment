@@ -44,6 +44,21 @@ training:
   max_seq_length: 2560
   logging_backend: tensorboard
 
+# Etape 1 du pipeline facon InstructGPT. Obligatoire ici, pas optionnelle: les deux
+# backbones sont des checkpoints *base* et ne suivent pas d'instruction. Faire du DPO
+# dessus optimiserait une preference entre deux sorties mal formees.
+sft:
+  dataset: "CohereLabs/aya_dataset"   # tranche haoussa: 3 512 exemples, natif, Apache-2.0
+  language: "Hausa"
+  train_size: 2810                    # split mesure au notebook 03: 2 810 train / 702 eval
+  learning_rate: 2.0e-5               # plus eleve qu'en DPO: on apprend un format, pas une preference
+  num_epochs: 2
+  warmup_ratio: 0.03
+  batch_size: 2
+  gradient_accumulation_steps: 8
+  gradient_checkpointing: true
+  logging_steps: 10
+
 dpo:
   # Built locally by src/data.py from UbuntuGuard's released test JSONL, not pulled from
   # the Hub -- point this at the file to use. The NLLB-translated counterfactual the
