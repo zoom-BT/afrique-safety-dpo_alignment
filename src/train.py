@@ -197,7 +197,8 @@ def resolve_device_map(training_config: dict):
     return {"": 0}
 
 
-def load_causal_lm(model_name: str, training_config: dict, dtype=None):
+def load_causal_lm(model_name: str, training_config: dict, dtype=None,
+                   adapter_path: str | None = None):
     """Load a backbone for text-only causal LM use, quantized per `training_config`.
 
     Both backbones here are `model_type: qwen3_5`, whose checkpoints declare
@@ -251,6 +252,19 @@ def load_causal_lm(model_name: str, training_config: dict, dtype=None):
         from peft import prepare_model_for_kbit_training
 
         model = prepare_model_for_kbit_training(model)
+
+    if adapter_path is not None:
+        # `trainer.save_model()` on a PEFT model writes the *adapter* alone --
+        # adapter_config.json plus adapter_model.safetensors -- never a full checkpoint.
+        # AutoModelForCausalLM cannot read that directory, so the SFT stage's output has to
+        # be layered onto the base model here rather than passed as a model name.
+        #
+        # `is_trainable=True` matters: without it PEFT loads the adapter frozen for
+        # inference, and the DPO stage would run with nothing to update. It would not
+        # error -- it would simply train nothing, and report a loss that barely moves.
+        from peft import PeftModel
+
+        model = PeftModel.from_pretrained(model, adapter_path, is_trainable=True)
     return model
 
 
@@ -428,9 +442,13 @@ def run_dpo(config: dict, pairs: list[dict] | None = None,
     dtype_by_precision = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}
     dtype = dtype_by_precision[precision]
 
+    # `model_path` names the *base* backbone; `adapter_path` points at the SFT stage's
+    # output. Keeping them separate is what lets the DPO stage start from an SFT-aligned
+    # model without the base name ever having to change between arms.
     model_name = model_path or config["model"]["base_model_name"]
+    adapter_path = config["dpo"].get("adapter_path")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = load_causal_lm(model_name, training_config, dtype=dtype)
+    model = load_causal_lm(model_name, training_config, dtype=dtype, adapter_path=adapter_path)
 
     if pairs is None:
         train_pairs, eval_pairs = build_ubuntuguard_dpo_datasets(
@@ -489,7 +507,10 @@ def run_dpo(config: dict, pairs: list[dict] | None = None,
         args=dpo_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        peft_config=build_peft_config(training_config),
+        # No `peft_config` once an SFT adapter is loaded: the model is already a PeftModel
+        # and DPO continues training that adapter. Passing one would stack a second adapter
+        # on top and leave the SFT one frozen underneath.
+        peft_config=None if adapter_path else build_peft_config(training_config),
         processing_class=tokenizer,
     )
     trainer.train()

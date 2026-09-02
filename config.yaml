@@ -108,6 +108,10 @@ dpo:
   # which varies the backbone over a single dataset. See the vault's
   # Week5_Deviations_From_Proposal.md, D6.
   ubuntuguard_path: "data/Ubuntu_guard_test_crosslingual.jsonl"
+  # Adaptateur LoRA produit par l'etape SFT. Laisser null pour un DPO partant du modele
+  # base; le renseigner pour la seconde soumission d'un bras, puisqu'un bras entier
+  # (9,76 h) depasse le plafond de session Kaggle (9 h).
+  adapter_path: null
   dataset_name: null
   # Which HHH axis to train on: "honest", "harmless", or null for all themes.
   # The study trains on honest and evaluates on both -- harmless-only leaves 216 training
