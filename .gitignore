@@ -28,3 +28,6 @@ results/**/dpo_checkpoints/
 # OS
 .DS_Store
 Thumbs.db
+
+# Kaggle batch staging (regenerable, one directory per pushed notebook)
+.kaggle_staging/
