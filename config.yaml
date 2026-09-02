@@ -72,7 +72,11 @@ sft:
   # checkpointing echange du calcul contre de la memoire, or la memoire n'est plus le
   # facteur limitant depuis seq 1024 + batch 1. Remettre a true si l'OOM revient.
   gradient_checkpointing: false
-  num_epochs: 1
+  # Deux epoques, retablies apres correction d'une erreur de cadrage: j'avais compare le
+  # cout total au quota d'UNE semaine (30 h) alors que le stage en compte trois, soit 90 h.
+  # Au pire scenario, deux bras sur trois graines coutent 47 h -- ils tiennent. Reduire les
+  # epoques etait la seule des trois economies qui degradait le resultat.
+  num_epochs: 2
   logging_steps: 10
   # Le "chunked_nll" par defaut de TRL est incompatible avec device_map="auto": il patche
   # model.forward en supposant une methode liee, alors qu'accelerate l'enveloppe dans un
