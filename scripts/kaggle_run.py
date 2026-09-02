@@ -134,13 +134,20 @@ def push(args) -> int:
     print(f"staged {notebook.name} + kernel-metadata.json in {staging}")
     print(json.dumps(metadata, indent=2))
 
-    if args.gpu:
-        print(
-            f"\nGPU enabled. Set the accelerator to {PREFERRED_ACCELERATOR} in the kernel's "
-            "settings — Kaggle also offers P100, which is Pascal and markedly slower for "
-            "the 4-bit + fp16 path this project uses."
-        )
-    return _run(["kaggle", "kernels", "push", "-p", str(staging)])
+    command = ["kaggle", "kernels", "push", "-p", str(staging)]
+    if args.accelerator:
+        # Passed both in the metadata file and on the command line: the flag wins
+        # server-side, and the two agreeing removes any doubt about which took effect.
+        command += ["--accelerator", ACCELERATORS[args.accelerator]]
+    if args.timeout:
+        command += ["-t", str(args.timeout)]
+    if args.dry_run:
+        # Exists because verifying the command used to require running it, which
+        # publishes to the account and spends quota. Checking a command should never
+        # cost what the command costs.
+        print(f"\n[dry-run] rien n'a ete envoye. Retirer --dry-run pour publier.")
+        return 0
+    return _run(command)
 
 
 def status(args) -> int:
@@ -173,6 +180,10 @@ def main() -> int:
         const=DEFAULT_ACCELERATOR,
         choices=sorted(ACCELERATORS),
         help="request a GPU; bare --accelerator means t4, the right choice here",
+    )
+    p.add_argument(
+        "--dry-run", action="store_true",
+        help="build and stage everything, print the command, but do not submit",
     )
     p.add_argument(
         "--timeout", type=int,

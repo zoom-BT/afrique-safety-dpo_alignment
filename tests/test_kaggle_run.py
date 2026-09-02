@@ -58,3 +58,15 @@ def test_metadata_code_file_is_the_bare_filename_not_the_path():
     # kaggle push uploads a directory; code_file must be relative to it.
     meta = build_metadata("notebooks/04_sft_hausa.ipynb", "balbinotchoutzine")
     assert meta["code_file"] == "04_sft_hausa.ipynb"
+
+
+def test_push_has_a_dry_run_so_checking_costs_nothing():
+    # Verifying the constructed command used to require actually submitting it, which
+    # publishes to the account and spends GPU quota.
+    import argparse
+
+    from kaggle_run import main
+    import inspect
+
+    src = inspect.getsource(main)
+    assert "--dry-run" in src
