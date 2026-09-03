@@ -117,3 +117,43 @@ def binomial_two_sided_p(successes: int, trials: int, probability: float) -> flo
     # construction for a distribution that is not symmetric.
     total = sum(p for k in range(trials + 1) if (p := pmf(k)) <= observed * (1 + 1e-9))
     return min(1.0, total)
+
+
+def mcnemar_p(first_correct: list[bool], second_correct: list[bool]) -> dict:
+    """Exact two-sided McNemar test for two models scored on the *same* questions.
+
+    Why this and not a two-proportion test: the arms answer an identical question set, so
+    treating their scores as two independent samples throws away the pairing and, with it,
+    statistical power that has already been paid for in GPU hours. Every question both
+    models get right, and every question both get wrong, carries no information about which
+    is better -- McNemar looks only at the disagreements.
+
+    The measured cost of ignoring this: on R0, A1 beat A0 by 17 questions out of 808, which
+    an unpaired test cannot separate from zero (p = 0.38). The disagreement count is what
+    decides, and it is invisible once per-question answers are discarded.
+
+    Exact rather than chi-squared: the discordant pairs are few, and the chi-squared
+    approximation is unreliable below roughly 25 of them.
+    """
+    if len(first_correct) != len(second_correct):
+        raise ValueError("both models must be scored on the same questions, in the same order")
+
+    only_first = sum(1 for a, b in zip(first_correct, second_correct) if a and not b)
+    only_second = sum(1 for a, b in zip(first_correct, second_correct) if b and not a)
+    discordant = only_first + only_second
+
+    if discordant == 0:
+        # The models never disagreed, so there is no evidence either way -- not evidence
+        # that they are equal.
+        return {"only_first": 0, "only_second": 0, "discordant": 0, "p": 1.0}
+
+    # Under the null, each disagreement is a fair coin. Two-sided, and symmetric because
+    # p = 0.5, so doubling the smaller tail is exact.
+    smaller = min(only_first, only_second)
+    tail = sum(math.comb(discordant, k) for k in range(smaller + 1)) * 0.5**discordant
+    return {
+        "only_first": only_first,
+        "only_second": only_second,
+        "discordant": discordant,
+        "p": min(1.0, 2 * tail),
+    }

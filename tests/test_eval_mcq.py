@@ -9,6 +9,7 @@ from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 from src.eval_mcq import (
     binomial_two_sided_p,
     evaluate_mcq,
+    mcnemar_p,
     normalised_log_likelihood,
     score_question,
 )
@@ -98,3 +99,64 @@ def test_a_clear_gain_over_chance_is_significant():
 
 def test_p_value_is_one_when_there_is_nothing_to_test():
     assert binomial_two_sided_p(0, 0, 0.25) == 1.0
+
+
+# --- test apparie ------------------------------------------------------------------
+
+
+def test_mcnemar_ignores_the_questions_where_both_models_agree():
+    """Les accords ne disent rien de qui est meilleur; seuls les desaccords tranchent.
+
+    Ici 500 questions justes des deux cotes et 500 fausses des deux cotes s'ajoutent aux
+    memes trois desaccords: le p ne doit pas bouger d'un iota.
+    """
+    maigre = mcnemar_p([True, True, True], [False, False, False])
+    gras = mcnemar_p(
+        [True] * 3 + [True] * 500 + [False] * 500,
+        [False] * 3 + [True] * 500 + [False] * 500,
+    )
+    assert maigre["discordant"] == gras["discordant"] == 3
+    assert maigre["p"] == pytest.approx(gras["p"])
+
+
+def test_mcnemar_is_more_powerful_than_the_unpaired_test():
+    """La raison d'etre de cette fonction, sur un cas ou les deux tests divergent.
+
+    Vingt questions ou seul le second modele reussit, aucune dans l'autre sens: apparie,
+    c'est ecrasant. Non apparie, vingt questions sur 808 se noieraient dans le bruit --
+    c'est exactement ce qui est arrive a R0.
+    """
+    premier = [True] * 300 + [False] * 20 + [False] * 488
+    second = [True] * 300 + [True] * 20 + [False] * 488
+    out = mcnemar_p(premier, second)
+    assert out["only_first"] == 0 and out["only_second"] == 20
+    assert out["p"] < 1e-5
+
+
+def test_mcnemar_is_symmetric_in_its_arguments():
+    a = [True, False, True, False, True]
+    b = [False, True, True, False, False]
+    droite = mcnemar_p(a, b)
+    gauche = mcnemar_p(b, a)
+    assert droite["p"] == pytest.approx(gauche["p"])
+    assert droite["only_first"] == gauche["only_second"]
+
+
+def test_mcnemar_reports_no_evidence_when_the_models_never_disagree():
+    """Zero desaccord n'est pas une preuve d'egalite: c'est une absence de preuve."""
+    out = mcnemar_p([True, False, True], [True, False, True])
+    assert out["discordant"] == 0 and out["p"] == 1.0
+
+
+def test_mcnemar_balanced_disagreements_are_not_significant():
+    """Dix desaccords de chaque cote, c'est le pile ou face parfait."""
+    premier = [True] * 10 + [False] * 10
+    second = [False] * 10 + [True] * 10
+    assert mcnemar_p(premier, second)["p"] == pytest.approx(1.0)
+
+
+def test_mcnemar_refuses_lists_of_different_lengths():
+    """Un decalage d'indice apparierait des questions differentes et donnerait un p faux
+    sans lever la moindre erreur."""
+    with pytest.raises(ValueError, match="same questions"):
+        mcnemar_p([True, False], [True])
