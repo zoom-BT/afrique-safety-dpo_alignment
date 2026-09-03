@@ -109,6 +109,15 @@ def build_metadata(
     }
 
 
+def qualify(source: str, username: str) -> str:
+    """Prefix a bare dataset or model slug with the owner Kaggle requires.
+
+    `afrique-safety-dpo-code` becomes `balbinotchoutzine/afrique-safety-dpo-code`; anything
+    already carrying a slash is left alone, so another owner's public dataset still works.
+    """
+    return source if "/" in source else f"{username}/{source}"
+
+
 def _run(args: list[str]) -> int:
     print("+", " ".join(args))
     # TEMPORARY, removable once kaggle > 2.2.4 ships. `kernels_output` writes the log with
@@ -138,6 +147,10 @@ def push(args) -> int:
         print(f"no such notebook: {notebook}", file=sys.stderr)
         return 1
 
+    # Kaggle exige `{username}/{slug}` et refuse le slug nu avec « Dataset must be
+    # specified in the form of '{username}/{dataset-slug}' ». Le message part sur stderr et
+    # le push echoue sans que rien d'autre ne le signale: le kernel n'est simplement jamais
+    # cree. On prefixe donc ici plutot que de compter sur l'operateur.
     metadata = build_metadata(
         str(notebook),
         args.username,
@@ -145,8 +158,8 @@ def push(args) -> int:
         accelerator=args.accelerator,
         internet=not args.no_internet,
         private=not args.public,
-        model_sources=args.model or [],
-        dataset_sources=args.dataset or [],
+        model_sources=[qualify(s, args.username) for s in (args.model or [])],
+        dataset_sources=[qualify(s, args.username) for s in (args.dataset or [])],
     )
     # Stage into a directory holding only this notebook. `kaggle kernels push -p DIR`
     # uploads everything in DIR, so pushing notebooks/ directly would ship every other
