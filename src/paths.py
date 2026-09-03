@@ -13,16 +13,21 @@ KAGGLE_WORKING = Path("/kaggle/working")
 
 
 def find_in_datasets(marker: str, root: Path = KAGGLE_INPUT) -> Path | None:
-    """Return the dataset directory holding `marker`, e.g. `*/src/data.py`.
+    """Return the directory holding `marker`, e.g. `src/data.py`, searched recursively.
 
-    Returns the first path segment under `root`, rather than counting parent levels: the
-    arithmetic version was off by one and resolved to /kaggle/input itself, which broke the
-    import without saying why.
+    Recursive, and returning the marker's own parent rather than the first segment under
+    `root`: Kaggle does not mount every dataset at the same depth. One kernel showed
+    `/kaggle/input/<slug>/src/...`, another `/kaggle/input/datasets/<slug>/src/...`, and a
+    fixed-depth glob missed the second entirely. Three runs were lost to assumptions about
+    this layout; searching costs nothing and survives whatever Kaggle does next.
     """
     if not root.exists():
         return None
-    for hit in root.glob(marker):
-        return root / hit.relative_to(root).parts[0]
+    name = marker.replace("*/", "").replace("*", "")
+    parts = tuple(p for p in Path(name).parts if p)
+    for hit in root.rglob(parts[-1]):
+        if hit.parts[-len(parts):] == parts:
+            return hit.parents[len(parts) - 1]
     return None
 
 

@@ -67,3 +67,30 @@ def test_resolve_roots_returns_the_file_itself_not_a_directory(tmp_path):
     roots = resolve_roots(cwd=tmp_path)
     assert roots["code"] == tmp_path
     assert roots["ubuntuguard"] == ug
+
+
+def test_find_in_datasets_survives_an_extra_nesting_level(tmp_path):
+    """Kaggle ne monte pas tous les datasets a la meme profondeur.
+
+    Un kernel a donne /kaggle/input/<slug>/src/..., un autre
+    /kaggle/input/datasets/<slug>/src/... Un glob a profondeur fixe ratait le second, et
+    le diagnostic le disait noir sur blanc: "Datasets attaches: ['datasets']".
+    """
+    profond = tmp_path / "datasets" / "afrique-safety-dpo-code" / "src"
+    profond.mkdir(parents=True)
+    (profond / "data.py").touch()
+    assert find_in_datasets("*/src/data.py", root=tmp_path) == profond.parent
+
+
+def test_find_in_datasets_still_handles_the_shallow_layout(tmp_path):
+    peu_profond = tmp_path / "afrique-safety-dpo-code" / "src"
+    peu_profond.mkdir(parents=True)
+    (peu_profond / "data.py").touch()
+    assert find_in_datasets("*/src/data.py", root=tmp_path) == peu_profond.parent
+
+
+def test_find_in_datasets_requires_the_full_marker_path(tmp_path):
+    """Un data.py hors d'un dossier src/ ne doit pas etre pris pour la racine du code."""
+    (tmp_path / "ailleurs").mkdir()
+    (tmp_path / "ailleurs" / "data.py").touch()
+    assert find_in_datasets("*/src/data.py", root=tmp_path) is None
