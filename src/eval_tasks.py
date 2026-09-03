@@ -74,7 +74,22 @@ def evaluate_numeric(
     correct = 0
     unparsed = 0
     records = []
-    halting = {"stop_strings": list(stop), "tokenizer": tokenizer} if stop else {}
+
+    halting = {}
+    if stop:
+        from transformers.generation.stopping_criteria import (
+            StoppingCriteriaList,
+            StopStringCriteria,
+        )
+
+        # Construit UNE fois, hors de la boucle. StopStringCriteria indexe la totalite du
+        # vocabulaire a sa construction: 5,0 s mesurees sur les 248 077 entrees de
+        # Qwen3.5. Passe par `stop_strings=`, generate() le reconstruirait a chaque appel,
+        # soit une fois par question -- 21 minutes de surcout pur sur 250 questions, plus
+        # que la generation elle-meme.
+        halting["stopping_criteria"] = StoppingCriteriaList(
+            [StopStringCriteria(tokenizer=tokenizer, stop_strings=list(stop))]
+        )
 
     for row in rows:
         prompt = template.format(question=row["question"])

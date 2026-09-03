@@ -64,6 +64,32 @@ def test_troncature_laisse_passer_un_arret_absent():
     assert truncate_at("Amsar shine 18.", ["\n\n"]) == "Amsar shine 18."
 
 
+def test_evaluate_numeric_construit_le_critere_une_seule_fois(tiny, monkeypatch):
+    """Le critere d'arret indexe tout le vocabulaire a sa construction -- 5 s mesurees sur
+    les 248 077 entrees de Qwen3.5. Le construire par appel de generate() coutait 21 min
+    sur 250 questions, plus que la generation. Il doit l'etre une fois pour tout le lot."""
+    import transformers.generation.stopping_criteria as sc
+
+    from src import eval_tasks
+
+    constructions = []
+    vrai = sc.StopStringCriteria
+
+    class Compteur(vrai):
+        def __init__(self, *a, **kw):
+            constructions.append(1)
+            super().__init__(*a, **kw)
+
+    monkeypatch.setattr(sc, "StopStringCriteria", Compteur)
+
+    modele, tok = tiny
+    lignes = [{"question": f"q{i}", "answer_number": i} for i in range(4)]
+    eval_tasks.evaluate_numeric(
+        modele, tok, lignes, max_new_tokens=4, stop=["\n\n"]
+    )
+    assert len(constructions) == 1, f"{len(constructions)} constructions pour 4 questions"
+
+
 def _ligne(texte, etiquette):
     return {"tweet": texte, "label": etiquette}
 
