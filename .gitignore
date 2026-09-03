@@ -36,3 +36,7 @@ Thumbs.db
 
 # Kaggle batch staging (regenerable, one directory per pushed notebook)
 .kaggle_staging/
+
+# Adaptateurs LoRA rapatries de Kaggle: 42 Mo chacun, binaires, reproduits par les runs.
+# Ils transitent vers Kaggle par un dataset prive, pas par git.
+adapters/

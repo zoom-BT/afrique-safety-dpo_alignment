@@ -183,6 +183,12 @@ def push(args) -> int:
 DATASET_KINDS = {
     "code": ["src", "config.yaml", "requirements.txt"],
     "data": ["data"],
+    # Adaptateurs LoRA produits par l'etape SFT, rapatries depuis la sortie du kernel qui
+    # les a entraines. Necessaire parce que /kaggle/working appartient a un kernel et n'est
+    # pas lisible depuis un autre: le DPO d'un bras tourne dans une seconde soumission,
+    # un bras entier depassant le plafond de session. Il recupere donc son adaptateur par
+    # un dataset attache, et non par le disque de travail.
+    "adapters": ["adapters"],
 }
 
 
