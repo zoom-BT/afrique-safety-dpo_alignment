@@ -4,7 +4,7 @@ import pytest
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
-from src.eval_tasks import evaluate_classification, extract_final_number
+from src.eval_tasks import evaluate_classification, extract_final_number, truncate_at
 
 
 @pytest.fixture(scope="module")
@@ -37,6 +37,31 @@ def test_extraction_renvoie_none_sans_nombre():
     """Distinguer 'aucun nombre produit' de 'mauvais nombre' -- deux echecs differents."""
     assert extract_final_number("je ne sais pas repondre") is None
     assert extract_final_number("") is None
+
+
+def test_troncature_protege_extract_final_number_du_few_shot():
+    """Le mode d'echec que la troncature existe pour empecher.
+
+    Amorce en few-shot, un modele base ne s'arrete pas apres avoir repondu: il enchaine sur
+    un exercice invente. Comme l'extraction prend le DERNIER nombre, la reponse serait
+    scoree sur la question hallucinee -- ici 99 au lieu de 18.
+    """
+    sortie = "Amsar shine 18.\n\nTambaya: Ali yana da kwallo 99?"
+    assert extract_final_number(sortie) == 99
+    assert extract_final_number(truncate_at(sortie, ["\n\n"])) == 18
+
+
+def test_troncature_prend_la_premiere_occurrence():
+    assert truncate_at("a FIN b Tambaya c", ["Tambaya", "FIN"]) == "a "
+
+
+def test_troncature_sans_arret_ne_change_rien():
+    assert truncate_at("texte intact", None) == "texte intact"
+    assert truncate_at("texte intact", []) == "texte intact"
+
+
+def test_troncature_laisse_passer_un_arret_absent():
+    assert truncate_at("Amsar shine 18.", ["\n\n"]) == "Amsar shine 18."
 
 
 def _ligne(texte, etiquette):

@@ -36,6 +36,20 @@ def extract_final_number(text: str) -> float | None:
         return None
 
 
+def truncate_at(text: str, stop: list[str] | None) -> str:
+    """Cut `text` at the earliest stop string, or return it unchanged.
+
+    Needed because the models under test are *base* checkpoints: prompted few-shot, they do
+    not stop after answering, they carry on inventing the next exercise. Since
+    `extract_final_number` deliberately takes the last number, an untruncated completion
+    would be scored on a hallucinated follow-up question rather than on the answer.
+    """
+    if not stop:
+        return text
+    cuts = [i for i in (text.find(s) for s in stop) if i >= 0]
+    return text[: min(cuts)] if cuts else text
+
+
 def evaluate_numeric(
     model,
     tokenizer,
@@ -43,18 +57,24 @@ def evaluate_numeric(
     template: str = "{question}",
     max_new_tokens: int = 256,
     tolerance: float = 1e-6,
+    stop: list[str] | None = None,
 ) -> dict:
     """Accuracy on rows carrying `question` and `answer_number` (AfriMGSM's schema).
 
     `unparsed` is reported separately from wrong answers. A model that rambles without ever
     producing a number is failing differently from one that computes badly, and collapsing
     the two would hide which.
+
+    `stop` does double duty: it ends generation early -- a chain-of-thought answer runs to
+    about fifty tokens, so stopping there rather than at `max_new_tokens` cuts the run
+    several-fold -- and it truncates whatever still slipped through before scoring.
     """
     import torch
 
     correct = 0
     unparsed = 0
     records = []
+    halting = {"stop_strings": list(stop), "tokenizer": tokenizer} if stop else {}
 
     for row in rows:
         prompt = template.format(question=row["question"])
@@ -63,9 +83,13 @@ def evaluate_numeric(
             generated = model.generate(
                 **inputs, max_new_tokens=max_new_tokens, do_sample=False,
                 pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
+                **halting,
             )
-        completion = tokenizer.decode(
-            generated[0][inputs.input_ids.shape[-1]:], skip_special_tokens=True
+        completion = truncate_at(
+            tokenizer.decode(
+                generated[0][inputs.input_ids.shape[-1]:], skip_special_tokens=True
+            ),
+            stop,
         )
         predicted = extract_final_number(completion)
         expected = float(row["answer_number"])
