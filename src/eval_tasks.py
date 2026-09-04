@@ -196,3 +196,87 @@ def evaluate_classification(
         "confusion": {f"{labels[t]}->{labels[p]}": c for (t, p), c in confusion.items() if c},
         "per_row": per_row,
     }
+
+
+def macro_f1_from_rows(rows: list[dict], n_labels: int) -> float:
+    """Macro F1 recomputed from `[{gold, predicted}]` records.
+
+    Needed because a bootstrap resamples items, so the F1 has to be recomputed on each
+    resample — the aggregate returned by `evaluate_classification` cannot be resampled.
+
+    Labels absent from a resample's gold set are skipped, exactly as in
+    `evaluate_classification`: a label nobody was supposed to predict must not drag the
+    average toward zero.
+    """
+    f1_scores = []
+    for i in range(n_labels):
+        tp = sum(1 for r in rows if r["gold"] == i and r["predicted"] == i)
+        fp = sum(1 for r in rows if r["gold"] != i and r["predicted"] == i)
+        fn = sum(1 for r in rows if r["gold"] == i and r["predicted"] != i)
+        if tp + fn == 0:
+            continue
+        precision = tp / (tp + fp) if tp + fp else 0.0
+        recall = tp / (tp + fn)
+        f1_scores.append(
+            2 * precision * recall / (precision + recall) if precision + recall else 0.0
+        )
+    return sum(f1_scores) / len(f1_scores) if f1_scores else 0.0
+
+
+def bootstrap_macro_f1(
+    datasets: dict[str, list[dict]],
+    statistic,
+    n_labels: int,
+    iterations: int = 2000,
+    seed: int = 0,
+    confidence: float = 0.95,
+) -> dict:
+    """Paired bootstrap of any statistic built from several arms' macro F1 scores.
+
+    Paired, deliberately: every arm classified the *same* items in the same order, so a
+    resample must draw the same item indices for all of them. Resampling each arm
+    independently would break that correspondence and inflate the interval — the same
+    reasoning that makes McNemar the right test for accuracy.
+
+    This exists because macro F1 has no closed-form paired test. The quantity the project
+    actually cares about is a difference of differences — did alignment help one backbone
+    more than the other — and that has no analytic variance at all.
+
+    `statistic` receives `{name: macro_f1}` and returns one number.
+    """
+    import random
+
+    noms = list(datasets)
+    tailles = {len(datasets[n]) for n in noms}
+    if len(tailles) != 1:
+        raise ValueError(f"les bras n'ont pas le meme nombre de lignes : {tailles}")
+    n = tailles.pop()
+    if n == 0:
+        raise ValueError("aucune ligne")
+
+    observe = statistic({nom: macro_f1_from_rows(datasets[nom], n_labels) for nom in noms})
+
+    alea = random.Random(seed)
+    tirages = []
+    for _ in range(iterations):
+        indices = [alea.randrange(n) for _ in range(n)]
+        tirages.append(statistic({
+            nom: macro_f1_from_rows([datasets[nom][i] for i in indices], n_labels)
+            for nom in noms
+        }))
+    tirages.sort()
+
+    marge = (1 - confidence) / 2
+    bas = tirages[int(marge * iterations)]
+    haut = tirages[min(iterations - 1, int((1 - marge) * iterations))]
+    # Proportion des tirages de signe oppose a l'observation, doublee: l'equivalent
+    # bootstrap d'un p bilateral.
+    contraires = sum(1 for t in tirages if ((t <= 0) if observe > 0 else (t >= 0)))
+    return {
+        "observe": observe,
+        "ic_bas": bas,
+        "ic_haut": haut,
+        "p_bilateral": min(1.0, 2 * contraires / iterations),
+        "exclut_zero": (bas > 0) or (haut < 0),
+        "iterations": iterations,
+    }
