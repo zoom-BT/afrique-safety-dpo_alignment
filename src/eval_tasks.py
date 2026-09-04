@@ -151,6 +151,11 @@ def evaluate_classification(
     lowered = [label.lower() for label in labels]
     confusion = {(t, p): 0 for t in range(len(labels)) for p in range(len(labels))}
     skipped = 0
+    # Justesse ligne par ligne, conservee pour le test apparie. Deux bras classent les
+    # memes lignes: les traiter comme des echantillons independants jetterait de la
+    # puissance statistique deja payee en GPU. N'agreger que le macro F1 rendrait McNemar
+    # impossible -- l'erreur commise une premiere fois sur le QCM.
+    per_row = []
 
     for row in rows:
         gold_raw = str(row.get(label_field, "")).strip().lower()
@@ -162,6 +167,7 @@ def evaluate_classification(
             model, tokenizer, row[text_field], labels, template.replace("{text}", "{question}")
         )
         confusion[(gold, predicted)] += 1
+        per_row.append({"gold": gold, "predicted": predicted})
 
     used = sum(confusion.values())
     if used == 0:
@@ -188,4 +194,5 @@ def evaluate_classification(
         "macro_f1": sum(f1_scores) / len(f1_scores) if f1_scores else 0.0,
         "per_label": per_label,
         "confusion": {f"{labels[t]}->{labels[p]}": c for (t, p), c in confusion.items() if c},
+        "per_row": per_row,
     }
