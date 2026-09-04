@@ -4,7 +4,8 @@ import pytest
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
-from src.eval_tasks import evaluate_classification, extract_final_number, truncate_at
+from src.eval_tasks import (bootstrap_macro_f1, evaluate_classification,
+                            extract_final_number, macro_f1_from_rows, truncate_at)
 
 
 @pytest.fixture(scope="module")
@@ -151,3 +152,72 @@ def test_macro_f1_ignore_une_etiquette_absente_du_gold(tiny):
     lignes = [_ligne("a", "Normal"), _ligne("b", "Normal")]
     out = evaluate_classification(modele, tok, lignes, ETIQUETTES)
     assert out["per_label"]["Hate"]["support"] == 0
+
+
+# --- bootstrap du macro F1 ---------------------------------------------------------
+
+
+def _rangees(paires):
+    return [{"gold": g, "predicted": p} for g, p in paires]
+
+
+def test_macro_f1_recalcule_correspond_a_un_cas_calcule_a_la_main():
+    """Deux classes, une erreur dans chaque sens: F1 de 0,5 partout, donc macro 0,5."""
+    rangees = _rangees([(0, 0), (0, 1), (1, 1), (1, 0)])
+    assert macro_f1_from_rows(rangees, 2) == pytest.approx(0.5)
+
+
+def test_macro_f1_recalcule_ignore_une_etiquette_absente():
+    """Une etiquette que personne n'etait cense predire ne doit pas tirer la moyenne a zero.
+
+    Meme regle que dans evaluate_classification, et elle compte pour le bootstrap: un
+    reechantillonnage peut tres bien ne tirer aucune ligne de la classe minoritaire.
+    """
+    rangees = _rangees([(0, 0), (0, 0)])
+    assert macro_f1_from_rows(rangees, 3) == pytest.approx(1.0)
+
+
+def test_bootstrap_apparie_refuse_des_bras_de_tailles_differentes():
+    """Le bootstrap doit etre APPARIE: chaque tirage prend les memes indices dans tous les
+    bras. Des tailles differentes signifient que la correspondance ligne a ligne est
+    rompue, et l'intervalle serait faux sans que rien ne le signale."""
+    with pytest.raises(ValueError, match="meme nombre de lignes"):
+        bootstrap_macro_f1(
+            {"a": _rangees([(0, 0)]), "b": _rangees([(0, 0), (1, 1)])},
+            lambda f: f["b"] - f["a"], 2, iterations=10,
+        )
+
+
+def test_bootstrap_sur_deux_bras_identiques_contient_zero():
+    memes = _rangees([(0, 0), (1, 1), (0, 1), (1, 0)] * 8)
+    out = bootstrap_macro_f1({"a": memes, "b": list(memes)},
+                             lambda f: f["b"] - f["a"], 2, iterations=200, seed=1)
+    assert out["observe"] == pytest.approx(0.0)
+    assert not out["exclut_zero"]
+
+
+def test_bootstrap_detecte_un_ecart_franc():
+    """Un bras parfait contre un bras qui se trompe partout: l'intervalle doit exclure zero."""
+    parfait = _rangees([(0, 0), (1, 1)] * 30)
+    faux = _rangees([(0, 1), (1, 0)] * 30)
+    out = bootstrap_macro_f1({"a": faux, "b": parfait},
+                             lambda f: f["b"] - f["a"], 2, iterations=200, seed=1)
+    assert out["observe"] > 0.9
+    assert out["exclut_zero"]
+
+
+def test_bootstrap_accepte_une_difference_de_differences():
+    """La quantite qui interesse le projet: l'alignement a-t-il davantage aide un bras ?
+
+    Aucune variance analytique n'existe pour cela -- c'est la raison d'etre du bootstrap.
+    """
+    a_avant = _rangees([(0, 1), (1, 0)] * 20)          # mauvais
+    a_apres = _rangees([(0, 1), (1, 0)] * 20)          # inchange
+    b_avant = _rangees([(0, 1), (1, 0)] * 20)          # mauvais
+    b_apres = _rangees([(0, 0), (1, 1)] * 20)          # devenu parfait
+    out = bootstrap_macro_f1(
+        {"a0": a_avant, "a1": a_apres, "b0": b_avant, "b1": b_apres},
+        lambda f: (f["b1"] - f["b0"]) - (f["a1"] - f["a0"]),
+        2, iterations=200, seed=1,
+    )
+    assert out["observe"] > 0.9 and out["exclut_zero"]
