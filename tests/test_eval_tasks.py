@@ -121,6 +121,24 @@ def test_classification_accepte_une_casse_differente(tiny):
     assert out["n"] == 1 and out["skipped"] == 0
 
 
+def test_classification_conserve_la_justesse_ligne_par_ligne(tiny):
+    """Sans per_row, aucun test apparie n'est possible sur cet axe.
+
+    Deux bras classent les MEMES lignes: n'agreger que le macro F1 jetterait la puissance
+    statistique que l'appariement apporte. C'est l'erreur deja commise sur le QCM, ou
+    per_question etait supprime comme "trop volumineux".
+    """
+    modele, tok = tiny
+    lignes = [_ligne("a", "Normal"), _ligne("b", "Hate"), _ligne("c", "???")]
+    out = evaluate_classification(modele, tok, lignes, ETIQUETTES)
+    assert len(out["per_row"]) == out["n"] == 2       # la ligne ecartee n'y figure pas
+    assert all(set(r) == {"gold", "predicted"} for r in out["per_row"])
+    justes = sum(r["gold"] == r["predicted"] for r in out["per_row"])
+    assert justes == sum(
+        c for cle, c in out["confusion"].items() if cle.split("->")[0] == cle.split("->")[1]
+    )
+
+
 def test_classification_refuse_un_ensemble_vide(tiny):
     modele, tok = tiny
     with pytest.raises(ValueError, match="no usable row"):
