@@ -40,3 +40,8 @@ Thumbs.db
 # Adaptateurs LoRA rapatries de Kaggle: 42 Mo chacun, binaires, reproduits par les runs.
 # Ils transitent vers Kaggle par un dataset prive, pas par git.
 adapters/
+
+# Rapports de reference, gardes en local mais hors du depot: ils appartiennent
+# a leurs auteurs et pesent plusieurs Mo.
+rapport_/*.pdf
+rapport_/University of Bristol Thesis Template/
