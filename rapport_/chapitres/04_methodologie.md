@@ -1,10 +1,10 @@
-# Chapitre 3 : Methodologie
+# Chapitre 4 : Methodologie
 
 Ce chapitre expose le dispositif experimental. Il part de la question posee, la traduit en
 une comparaison a une seule variable, puis decrit ce qu il a fallu tenir constant, mesurer et
 verifier pour que l ecart observe soit attribuable a cette variable et a rien d autre.
 
-## 3.1 La question, ramenee a une comparaison
+## 4.1 La question, ramenee a une comparaison
 
 La question du stage tient en une phrase : l alignement d un modele de langue fonctionne-t-il
 mieux quand il part d un backbone pre-entraine en continu sur des langues africaines que
@@ -13,26 +13,26 @@ quand il part de la base d origine de ce backbone ?
 Pour y repondre, il faut deux modeles qui ne different que par ce point. AfriqueQwen3.5-4B
 a ete obtenu par pre-entrainement continu de Qwen3.5-4B-Base sur 35,5 milliards de tokens en
 cinquante langues africaines. Les deux partagent l architecture, la taille et, comme on le
-verifiera en 3.3, le vocabulaire. Ils forment donc la paire ideale : la seule difference
+verifiera en 4.3, le vocabulaire. Ils forment donc la paire ideale : la seule difference
 entre eux est ce que le pre-entrainement continu a modifie dans les poids.
 
 On applique aux deux la meme chaine d alignement, avec les memes donnees, la meme recette et
 la meme graine. Si l un des deux s aligne mieux, le backbone est la seule explication
 disponible.
 
-## 3.2 Le dispositif a six etats
+## 4.2 Le dispositif a six etats
 
 L alignement se fait en deux etapes, comme dans InstructGPT : un ajustement supervise sur
 des demonstrations (SFT), puis une optimisation de preferences sur des paires (DPO). Chaque
 backbone traverse les deux, ce qui donne six etats de modele, representes en
-[@fig:03_dispositif_six_etats].
+[@fig:04_dispositif_six_etats].
 
 ![Le dispositif a six etats. Deux backbones, trois niveaux d entrainement, et les trois
-ecarts qu ils permettent de mesurer.](../figures/fig_03_dispositif_six_etats.png)
-{#fig:03_dispositif_six_etats}
+ecarts qu ils permettent de mesurer.](../figures/fig_04_dispositif_six_etats.png)
+{#fig:04_dispositif_six_etats}
 
 Table: Les six etats de modele et ce que chacun sert a mesurer
-{#tab:03_etats}
+{#tab:04_etats}
 
 | etat | backbone | entrainement | role |
 | :---- | :---- | :---- | :---- |
@@ -55,7 +55,7 @@ avantage qui preexistait.
 ne dirait pas laquelle des deux etapes a produit l effet. C est l ablation qu InstructGPT
 pratique entre ses propres etapes, reproduite ici.
 
-## 3.3 Ce qui est tenu constant, et comment on le verifie
+## 4.3 Ce qui est tenu constant, et comment on le verifie
 
 Un dispositif a une seule variable ne vaut que si tout le reste est reellement identique.
 Quatre elements ont ete verifies sur les fichiers eux-memes, plutot que supposes.
@@ -80,16 +80,16 @@ experiences, quelle que soit la premiere. Les faire varier ensemble melangerait 
 d entrainement et variance de decoupage, et un ecart entre graines ne mesurerait plus ce
 qu on veut.
 
-## 3.4 Les donnees de chaque etape
+## 4.4 Les donnees de chaque etape
 
 Chaque etape a un objectif different et demande des donnees de nature differente. La figure
-[@fig:03_flux_donnees] donne les volumes, la figure [@fig:03_inventaire_jeux] la provenance
+[@fig:04_flux_donnees] donne les volumes, la figure [@fig:04_inventaire_jeux] la provenance
 et les licences.
 
 ![Volumes de donnees a chaque etape, et ce qui a du etre ecarte. Les barres sont
 normalisees : chaque etape occupe la meme largeur, les segments montrent les
-proportions.](../figures/fig_03_flux_donnees.png)
-{#fig:03_flux_donnees}
+proportions.](../figures/fig_04_flux_donnees.png)
+{#fig:04_flux_donnees}
 
 **Le SFT apprend un format.** Il doit faire passer un modele qui complete du texte a un
 modele qui repond a une instruction. Il lui faut des demonstrations naturelles. Le jeu Aya
@@ -112,10 +112,10 @@ donc la veracite en haoussa sur des idees recues americaines, ce qui est une lim
 non du protocole, et qui sera reprise au chapitre 5.
 
 ![Tous les jeux utilises, avec leur role, leur volume, leur licence et leur
-provenance.](../figures/fig_03_inventaire_jeux.png)
-{#fig:03_inventaire_jeux}
+provenance.](../figures/fig_04_inventaire_jeux.png)
+{#fig:04_inventaire_jeux}
 
-## 3.5 Les trois axes d evaluation
+## 4.5 Les trois axes d evaluation
 
 L evaluation suit la decomposition classique en trois axes, utile (helpful), honnete
 (honest) et inoffensif (harmless). Elle repose sur un principe unique : **aucun modele
@@ -127,7 +127,7 @@ juge humain n etait pas disponible. On compare donc partout des nombres, jamais 
 ce qui rend le scoring aussi fiable en haoussa qu en anglais.
 
 Table: Les trois axes, leur jeu, leur metrique et leur plancher
-{#tab:03_axes}
+{#tab:04_axes}
 
 | axe | jeu | metrique | n | plancher |
 | :---- | :---- | :---- | ---: | ---: |
@@ -162,7 +162,7 @@ Cet axe n est pas entraine non plus : UbuntuGuard ne fournit que 26 paires haous
 theme, trop peu pour un entrainement. Il mesure donc un transfert entre axes : aligner sur la
 veracite change-t-il quelque chose a la moderation ?
 
-## 3.6 Les tests statistiques
+## 4.6 Les tests statistiques
 
 Un score au-dessus de son plancher ne prouve rien par lui-meme, et un ecart entre deux
 scores non plus. Deux tests sont utilises, chacun pour la question qu il sait trancher.
@@ -192,7 +192,7 @@ memes indices pour les six etats** puisqu ils ont classe les memes lignes, et on
 macro F1 de chacun a chaque tirage. Reechantillonner chaque bras separement romprait la
 correspondance et gonflerait l intervalle sans le signaler.
 
-## 3.7 La contamination decouverte dans Uhura
+## 4.7 La contamination decouverte dans Uhura
 
 Uhura-TruthfulQA publie deux configurations pour chaque langue : une en generation, avec
 meilleure reponse et reponses incorrectes, et une en choix multiple. Ce sont deux mises en
@@ -216,13 +216,13 @@ d entrainement ne subsiste.
 Le prix est la puissance statistique, et il faut le chiffrer plutot que le mentionner. Avec
 183 questions et une trentaine de desaccords entre deux etats, le test de McNemar ne peut
 declarer significatif qu un ecart d au moins 7,1 points, comme le montre la figure
-[@fig:03_seuils_detection]. Un ecart plus petit, s il existe, restera invisible. Cette limite
+[@fig:04_seuils_detection]. Un ecart plus petit, s il existe, restera invisible. Cette limite
 est enoncee des maintenant parce qu elle conditionne la lecture des resultats de l axe Honest
 au chapitre 5.
 
 ![Ecart observe contre plus petit ecart detectable, par axe. Un resultat non significatif
-n informe que si la mesure pouvait voir un effet.](../figures/fig_03_seuils_detection.png)
-{#fig:03_seuils_detection}
+n informe que si la mesure pouvait voir un effet.](../figures/fig_04_seuils_detection.png)
+{#fig:04_seuils_detection}
 
 Les deux autres axes ne sont pas concernes : ni AfriMGSM ni AfriHate n ont servi a
 l entrainement, et leurs effectifs sont conserves entiers.

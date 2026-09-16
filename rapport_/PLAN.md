@@ -53,7 +53,27 @@ Montreal.
 
 ---
 
-## Chapitre 2 : Etat de l art
+## Chapitre 2 : Generalites et concepts fondamentaux
+
+Ce chapitre donne au lecteur les notions necessaires pour suivre la suite, dans l ordre ou
+il en aura besoin. Il ne fait pas de revue de litterature : c est l objet du chapitre 3.
+
+- 2.1 Les modeles de langue et la tokenisation, avec le vocabulaire de 248 077 entrees qui
+  reviendra a chaque chapitre
+- 2.2 L alignement et ses deux etapes, SFT puis preferences, avec InstructGPT comme fil
+- 2.3 DPO, explique a partir de sa fonction de perte, parce que la marge de recompense du
+  chapitre 6 ne se comprend pas sans elle
+- 2.4 LoRA et QLoRA, et pourquoi ils rendent possible ce qui ne l etait pas sur un T4
+- 2.5 Le pre-entrainement continu : ce qu il fait et ne fait pas aux poids
+- 2.6 Evaluer sans juge : log-vraisemblance, plancher, tests apparies
+
+Figures : l illustration de LifeArchitect (empilement base puis alignement), notre schema
+isometrique de la chaine a deux etapes, le redessin de LoRA d apres Hu et al., et deux
+schemas a dessiner pour le scoring par log-vraisemblance et pour DPO.
+
+---
+
+## Chapitre 3 : Etat de l art
 
 - 2.1 L alignement des modeles de langue : SFT, modeles de recompense, RLHF, et la lignee
   InstructGPT
@@ -67,47 +87,47 @@ Montreal.
 
 ---
 
-## Chapitre 3 : Methodologie
+## Chapitre 4 : Methodologie
 
 Le coeur scientifique du rapport.
 
-- 3.1 La question, formulee comme une comparaison a une seule variable
-- 3.2 Le dispositif a six etats : A0, A1, A2s, A3s, A2d, A3d, et les trois ecarts qu il
+- 4.1 La question, formulee comme une comparaison a une seule variable
+- 4.2 Le dispositif a six etats : A0, A1, A2s, A3s, A2d, A3d, et les trois ecarts qu il
   permet de mesurer
-- 3.3 Ce qui est tenu constant, et comment on le verifie plutot que de le supposer :
+- 4.3 Ce qui est tenu constant, et comment on le verifie plutot que de le supposer :
   empreintes de la partition d evaluation, identite des tokenizers, nombre de pas
-- 3.4 Les donnees de chaque etape, et pourquoi elles conviennent a leur objectif
-- 3.5 Les trois axes d evaluation, leurs metriques, leurs planchers
-- 3.6 Les tests statistiques : McNemar pour les mesures appariees, bootstrap apparie pour le
+- 4.4 Les donnees de chaque etape, et pourquoi elles conviennent a leur objectif
+- 4.5 Les trois axes d evaluation, leurs metriques, leurs planchers
+- 4.6 Les tests statistiques : McNemar pour les mesures appariees, bootstrap apparie pour le
   macro F1 qui n a pas de test analytique
-- 3.7 La contamination decouverte dans Uhura, et la decision de n evaluer que sur 183
+- 4.7 La contamination decouverte dans Uhura, et la decision de n evaluer que sur 183
   questions
 
 ---
 
-## Chapitre 4 : Mise en oeuvre
+## Chapitre 5 : Mise en oeuvre
 
 Chez Tchoumi, l implementation. Ici, la chaine technique.
 
-- 4.1 L environnement : Kaggle, ses deux sessions GPU simultanees, son plafond de session
-- 4.2 QLoRA : quantification en 4 bits, adaptateurs LoRA, et ce que cela permet sur un T4
-- 4.3 La chaine, etape par etape, avec les entrees et les sorties de chacune
-- 4.4 Les garde-fous contre les echecs silencieux, qui sont la vraie difficulte du projet :
+- 5.1 L environnement : Kaggle, ses deux sessions GPU simultanees, son plafond de session
+- 5.2 QLoRA : quantification en 4 bits, adaptateurs LoRA, et ce que cela permet sur un T4
+- 5.3 La chaine, etape par etape, avec les entrees et les sorties de chacune
+- 5.4 Les garde-fous contre les echecs silencieux, qui sont la vraie difficulte du projet :
   adaptateur pose sur le mauvais backbone, module reste en cache, dataset perime, graine de
   partition confondue avec la graine d entrainement
-- 4.5 Les obstacles techniques et leur resolution : memoire insuffisante en SFT, surcout du
+- 5.5 Les obstacles techniques et leur resolution : memoire insuffisante en SFT, surcout du
   critere d arret en evaluation, fragmentation memoire en DPO, tous ramenes a la meme cause
 
 ---
 
-## Chapitre 5 : Resultats
+## Chapitre 6 : Resultats
 
-- 5.1 Ce que le pre-entrainement continu apporte : modelisation de la langue, capacite
-- 5.2 Ce qu il n apporte pas : la veracite
-- 5.3 L alignement n amplifie pas l avantage, sur deux des trois axes
-- 5.4 L exception : l interaction mesuree sur l axe Harmless
-- 5.5 La replication sur trois graines, et ce qu elle valide ou invalide
-- 5.6 Les limites, enoncees et chiffrees : puissance statistique, une seule langue, un axe
+- 6.1 Ce que le pre-entrainement continu apporte : modelisation de la langue, capacite
+- 6.2 Ce qu il n apporte pas : la veracite
+- 6.3 L alignement n amplifie pas l avantage, sur deux des trois axes
+- 6.4 L exception : l interaction mesuree sur l axe Harmless
+- 6.5 La replication sur trois graines, et ce qu elle valide ou invalide
+- 6.6 Les limites, enoncees et chiffrees : puissance statistique, une seule langue, un axe
   sur trois, effet loge dans les classes minoritaires
 
 ---
@@ -130,10 +150,10 @@ Format bibtex, cles `auteur_annee_motcle`.
 
 | chapitre | sources dans le depot |
 | :---- | :---- |
-| 2 | `05_References/`, `06_Reading_Notes/` du vault |
-| 3 | `03_Experiments/Plan_Evaluation.md`, `Decision_Graines.md` |
-| 4 | `.claude/skills/pipeline/SKILL.md`, les notebooks, `src/` |
-| 5 | `03_Experiments/Resultats_E4.md`, `Resultats_DPO.md`, les dix figures deja produites |
+| 2, 3 | `05_References/`, `06_Reading_Notes/` du vault |
+| 4 | `03_Experiments/Plan_Evaluation.md`, `Decision_Graines.md` |
+| 5 | `.claude/skills/pipeline/SKILL.md`, les notebooks, `src/` |
+| 6 | `03_Experiments/Resultats_E4.md`, `Resultats_DPO.md`, les dix figures deja produites |
 
 Les figures de `07_Presentations/figures/` sont directement reutilisables : elles ont ete
 produites pour la soutenance et couvrent les courbes, les volumes de donnees, les resultats

@@ -1,11 +1,11 @@
-# Chapitre 4 : Mise en oeuvre
+# Chapitre 5 : Mise en oeuvre
 
 Ce chapitre decrit la chaine technique qui a produit les resultats du chapitre 5. Il suit
 l ordre d execution reel : l environnement d abord, puis la methode d entrainement qu il
 impose, puis chaque etape avec ses entrees et ses sorties. Il se termine par les garde-fous
 et les obstacles, parce que c est la que le temps du stage a reellement ete depense.
 
-## 4.1 L environnement de calcul
+## 5.1 L environnement de calcul
 
 Le stage ne disposait d aucun GPU local. Tout l entrainement et toute l evaluation ont tourne
 sur les offres gratuites de Kaggle et de Google Colab, ce qui a fixe trois contraintes des le
@@ -14,27 +14,27 @@ depart.
 **La memoire.** Un T4 de Kaggle offre 14,56 Go de memoire video. Un modele de quatre
 milliards de parametres en pleine precision en demanderait seize pour ses seuls poids, avant
 tout gradient et tout etat d optimiseur. L entrainement complet est donc exclu, et c est ce
-qui impose QLoRA, decrit en 4.2.
+qui impose QLoRA, decrit en 5.2.
 
 **Le temps.** Kaggle plafonne une session a neuf heures et le quota hebdomadaire a trente
 heures de GPU. Un bras entier, SFT puis DPO, dure environ neuf heures : trop pour une seule
 session. Chaque etape a donc ete decoupee en soumissions independantes, l etape suivante
-recuperant le resultat de la precedente par un dataset Kaggle attache, decrit en 4.3.
+recuperant le resultat de la precedente par un dataset Kaggle attache, decrit en 5.3.
 
 **La concurrence.** Kaggle autorise exactement deux sessions GPU simultanees. Cette limite
 n est pas documentee ; elle a ete mesuree en tentant une troisieme soumission, refusee avec
 le message correspondant. Elle a ete exploitee systematiquement : les deux bras d une meme
 etape ont toujours tourne en parallele, ce qui a divise par deux le temps de mur.
 
-Colab a servi aux evaluations de reference du chapitre 3, puis a ete abandonne pour la suite.
+Colab a servi aux evaluations de reference du chapitre 4, puis a ete abandonne pour la suite.
 Ses sessions expirent sans preavis, effacent leur disque et epuisent un quota que le service
 ne chiffre pas. Une session perdue a coute environ soixante-dix minutes de mesures, et c est
-ce qui a fixe la regle enoncee en 4.4 : le depot est la source, l executant ne detient rien.
+ce qui a fixe la regle enoncee en 5.4 : le depot est la source, l executant ne detient rien.
 
-Le tableau [@tab:04_environnement] resume ces contraintes.
+Le tableau [@tab:05_environnement] resume ces contraintes.
 
 Table: Contraintes de l environnement de calcul et leur consequence sur le dispositif
-{#tab:04_environnement}
+{#tab:05_environnement}
 
 | contrainte | valeur mesuree | consequence |
 | :---- | :---- | :---- |
@@ -43,7 +43,7 @@ Table: Contraintes de l environnement de calcul et leur consequence sur le dispo
 | quota hebdomadaire | 30 h | une graine complete par semaine |
 | sessions simultanees | 2 | les deux bras en parallele |
 
-## 4.2 QLoRA : entrainer un modele de quatre milliards de parametres sur un T4
+## 5.2 QLoRA : entrainer un modele de quatre milliards de parametres sur un T4
 
 QLoRA combine deux idees. Les poids du modele de base sont quantifies en quatre bits et
 geles : ils ne recoivent aucun gradient et occupent le quart de leur taille en demi
@@ -51,10 +51,10 @@ precision. L entrainement ne touche que des matrices de faible rang, les adaptat
 inserees dans les projections d attention et du bloc MLP.
 
 Les parametres retenus, identiques pour les deux bras et pour les deux etapes, sont donnes
-dans le tableau [@tab:04_qlora].
+dans le tableau [@tab:05_qlora].
 
 Table: Configuration QLoRA commune a toutes les experiences
-{#tab:04_qlora}
+{#tab:05_qlora}
 
 | parametre | valeur |
 | :---- | :---- |
@@ -82,15 +82,15 @@ Le resultat concret est un adaptateur de 42,5 Mo par bras et par etape, la ou le
 complet pese huit gigaoctets. C est ce qui rend possible le transfert entre soumissions
 Kaggle decrit ci-dessous.
 
-## 4.3 La chaine, etape par etape
+## 5.3 La chaine, etape par etape
 
 La chaine comporte quatre etapes d entrainement et trois d evaluation. Chacune est un
 notebook autonome, genere par script depuis le depot plutot que tape a la main, pour qu il
-reste reproductible. Le tableau [@tab:04_chaine] en donne les entrees, les sorties et les
+reste reproductible. Le tableau [@tab:05_chaine] en donne les entrees, les sorties et les
 durees mesurees.
 
 Table: Les etapes de la chaine, avec leurs entrees, sorties et durees mesurees sur la graine 42
-{#tab:04_chaine}
+{#tab:05_chaine}
 
 | etape | entree | sortie | duree |
 | :---- | :---- | :---- | ---: |
@@ -116,11 +116,11 @@ de reference gele qu exige la methode est l adaptateur SFT lui-meme, ce qui evit
 gerer une seconde copie. Il produit 135 pas dans les deux bras.
 
 **L evaluation** charge chaque etat, c est-a-dire chaque couple backbone et adaptateur, en
-quatre bits comme a l entrainement, et lui applique les trois axes du chapitre 3. Elle
+quatre bits comme a l entrainement, et lui applique les trois axes du chapitre 4. Elle
 ecrit son resultat apres chaque etat, pas a la fin, pour qu une session coupee au cinquieme
 garde les quatre premiers.
 
-## 4.4 Les garde-fous contre les echecs silencieux
+## 5.4 Les garde-fous contre les echecs silencieux
 
 La vraie difficulte du projet n a pas ete de faire tourner l entrainement. Elle a ete de
 s assurer que ce qui tournait etait bien ce qu on croyait. Plusieurs modes de defaillance
@@ -162,9 +162,9 @@ ete verifiee identique par empreinte MD5.
 l exactitude agregee, jugeant le detail trop volumineux. C est precisement ce qui interdit
 le test apparie de McNemar, seul capable de trancher un ecart de dix-sept questions sur
 huit cent huit. Le detail est desormais conserve partout, et pour la classification, les
-etiquettes predites le sont aussi, sans quoi le bootstrap du chapitre 3 serait impossible.
+etiquettes predites le sont aussi, sans quoi le bootstrap du chapitre 4 serait impossible.
 
-## 4.5 Les obstacles techniques, et leur cause commune
+## 5.5 Les obstacles techniques, et leur cause commune
 
 Trois pannes ont coute chacune un ou plusieurs runs. Elles ont pris des formes differentes,
 et se sont revelees avoir la meme racine : le vocabulaire de Qwen3.5 compte 248 077 entrees,
